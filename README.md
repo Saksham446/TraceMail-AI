@@ -1,16 +1,68 @@
-# React + Vite
+# TraceMail AI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+### AI-Powered Email Threat Detection & Forensic Intelligence Platform
 
-Currently, two official plugins are available:
+TraceMail AI is an email security and forensic intelligence platform designed to help security teams analyze suspicious emails, identify potential threats, investigate digital evidence, correlate related activities, and generate actionable investigation reports.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The platform brings email threat analysis, header forensics, source intelligence, campaign correlation, case management, and reporting into a unified investigation workflow.
 
-## React Compiler
+---
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Overview
 
-## Expanding the ESLint configuration
+Modern email threats such as phishing, credential theft, impersonation, and Business Email Compromise (BEC) often require more than simple spam detection.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+TraceMail AI provides a structured investigation workflow that helps security analysts move from:
+
+**Email → Detection → Investigation → Correlation → Case → Report**
+
+The platform focuses on explainable analysis and forensic investigation rather than simply marking an email as spam.
+
+---
+
+## Core Capabilities
+
+- Email threat analysis
+- Threat score and severity assessment
+- Explainable threat indicators
+- Phishing and credential-theft detection
+- Business Email Compromise (BEC) investigation
+- SPF, DKIM and DMARC analysis
+- Email header forensics
+- Suspicious URL and domain analysis
+- Source IP intelligence
+- Geographic and infrastructure intelligence
+- Threat campaign correlation
+- Investigation case management
+- Forensic report generation
+- Security alerts for high-risk findings
+
+The platform is designed to be extensible, allowing additional detection methods, intelligence sources, security controls, and investigation capabilities to be integrated over time.
+
+---
+
+## Investigation Workflow
+
+```text
+                 Email Evidence
+                       │
+                       ▼
+              Threat Analysis
+                       │
+                       ▼
+              Threat Indicators
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+      Header        URL/Domain    Source IP
+      Forensics     Intelligence  Intelligence
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+              Campaign Correlation
+                       │
+                       ▼
+                Case Management
+                       │
+                       ▼
+               Forensic Reporting
