@@ -86,6 +86,181 @@ def detect_lookalike_domain(domain):
 
 
 # =========================================
+# IOC REPUTATION INTELLIGENCE
+# =========================================
+
+def analyze_ioc_reputation(urls, domain, source_ip, body):
+    """
+    Generate explainable reputation intelligence for
+    URLs, domains and source IPs using deterministic
+    forensic rules.
+    """
+
+    url_results = []
+    domain_results = []
+    ip_results = []
+
+    body_lower = (body or "").lower()
+    domain_lower = (domain or "").lower()
+
+    # URL reputation
+    for url in urls or []:
+        url_lower = url.lower()
+        reasons = []
+        score = 0
+
+        if any(
+            pattern in url_lower
+            for pattern in [
+                "micros0ft", "microsft", "paypa1",
+                "g00gle", "app1e", "amaz0n", "faceb00k"
+            ]
+        ):
+            score += 40
+            reasons.append(
+                "Lookalike / impersonation domain detected"
+            )
+
+        credential_keywords = [
+            "verify", "login", "signin", "account",
+            "password", "credential", "security"
+        ]
+
+        matched_keywords = [
+            keyword
+            for keyword in credential_keywords
+            if keyword in url_lower
+        ]
+
+        if matched_keywords:
+            score += 20
+            reasons.append(
+                "Credential or account-related URL keyword detected"
+            )
+
+        if url_lower.startswith("http://"):
+            score += 15
+            reasons.append(
+                "URL uses unencrypted HTTP"
+            )
+
+        if any(
+            keyword in body_lower
+            for keyword in [
+                "urgent", "immediately", "act now", "within 24 hours"
+            ]
+        ):
+            score += 10
+            reasons.append(
+                "URL appears in urgency / social-engineering context"
+            )
+
+        if score >= 50:
+            reputation = "Malicious"
+        elif score >= 25:
+            reputation = "Suspicious"
+        else:
+            reputation = "Low Risk"
+
+        url_results.append({
+            "ioc": url,
+            "type": "URL",
+            "reputation": reputation,
+            "score": min(score, 100),
+            "reasons": reasons
+        })
+
+    # Domain reputation
+    if domain:
+        reasons = []
+        score = 0
+
+        lookalike_result = detect_lookalike_domain(domain)
+
+        if lookalike_result:
+            score += 50
+            reasons.append(lookalike_result)
+
+        if any(
+            keyword in domain_lower
+            for keyword in [
+                "support", "security", "verify", "login", "account"
+            ]
+        ):
+            score += 15
+            reasons.append(
+                "Domain contains security/account-themed keywords"
+            )
+
+        if any(char.isdigit() for char in domain_lower):
+            score += 10
+            reasons.append(
+                "Domain contains numeric characters"
+            )
+
+        if score >= 50:
+            reputation = "Malicious"
+        elif score >= 25:
+            reputation = "Suspicious"
+        else:
+            reputation = "Low Risk"
+
+        domain_results.append({
+            "ioc": domain,
+            "type": "Domain",
+            "reputation": reputation,
+            "score": min(score, 100),
+            "reasons": reasons
+        })
+
+    # Source IP reputation
+    if source_ip:
+        reasons = []
+        score = 0
+
+        if source_ip not in ["127.0.0.1", "localhost", "::1"]:
+            score += 20
+            reasons.append(
+                "External source infrastructure observed"
+            )
+
+        if any(
+            keyword in body_lower
+            for keyword in ["urgent", "password", "login", "verify"]
+        ):
+            score += 10
+            reasons.append(
+                "IP is associated with suspicious email content"
+            )
+
+        if score >= 50:
+            reputation = "Malicious"
+        elif score >= 25:
+            reputation = "Suspicious"
+        else:
+            reputation = "Low Risk"
+
+        ip_results.append({
+            "ioc": source_ip,
+            "type": "IP",
+            "reputation": reputation,
+            "score": min(score, 100),
+            "reasons": reasons
+        })
+
+    return {
+        "urls": url_results,
+        "domains": domain_results,
+        "ips": ip_results,
+        "totalIOCs": (
+            len(url_results)
+            + len(domain_results)
+            + len(ip_results)
+        )
+    }
+
+
+# =========================================
 # ATTACHMENT FORENSICS
 # =========================================
 
@@ -720,6 +895,30 @@ def analyze_email(email: EmailRequest):
 
     urls = extract_urls(body)
 
+    # =========================================
+    # IOC REPUTATION INTELLIGENCE
+    # =========================================
+
+    ioc_reputation = analyze_ioc_reputation(
+        urls,
+        domain,
+        email.sourceIp,
+        body
+    )
+
+    if ioc_reputation["totalIOCs"] > 0:
+        for result in (
+            ioc_reputation["urls"]
+            + ioc_reputation["domains"]
+            + ioc_reputation["ips"]
+        ):
+            if result["reputation"] in ["Malicious", "Suspicious"]:
+                indicator = (
+                    f'{result["type"]} reputation: '
+                    f'{result["reputation"]} - {result["ioc"]}'
+                )
+                if indicator not in indicators:
+                    indicators.append(indicator)
 
     if urls:
 
@@ -1408,6 +1607,12 @@ def analyze_email(email: EmailRequest):
             "urlCount":
                 len(urls),
 
+            # =================================
+            # IOC REPUTATION INTELLIGENCE
+            # =================================
+
+            "iocReputation":
+                ioc_reputation,
 
             # =================================
             # ATTACHMENT FORENSICS

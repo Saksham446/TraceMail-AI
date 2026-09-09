@@ -207,6 +207,114 @@ const clearSavedEmail = () => {
   })
 }
 
+// =========================================
+// IOC REPUTATION INTELLIGENCE HELPERS
+// =========================================
+
+const normalizeIocReputationItems = (value) => {
+  if (!value) return []
+
+  const source = Array.isArray(value)
+    ? value
+    : Object.entries(value).map(([key, item]) => ({
+        ...(typeof item === 'object' && item !== null ? item : {}),
+        value:
+          typeof item === 'string'
+            ? item
+            : item?.value ||
+              item?.ioc ||
+              item?.url ||
+              item?.domain ||
+              item?.ip ||
+              key,
+      }))
+
+  return source
+    .map((item) => {
+      if (typeof item === 'string') {
+        return {
+          value: item,
+          reputation: 'UNKNOWN',
+          riskScore: 0,
+          reasons: [],
+        }
+      }
+
+      return {
+        ...item,
+        value:
+          item?.value ||
+          item?.ioc ||
+          item?.url ||
+          item?.domain ||
+          item?.ip ||
+          item?.indicator ||
+          '',
+        reputation:
+          item?.reputation ||
+          item?.verdict ||
+          item?.riskLevel ||
+          item?.classification ||
+          'UNKNOWN',
+        riskScore:
+          Number(
+            item?.riskScore ??
+              item?.score ??
+              item?.risk ??
+              0
+          ) || 0,
+        reasons: Array.isArray(item?.reasons)
+          ? item.reasons
+          : Array.isArray(item?.riskFactors)
+            ? item.riskFactors
+            : item?.reason
+              ? [item.reason]
+              : [],
+      }
+    })
+    .filter((item) => item.value)
+}
+
+const getIocReputationItems = (reputation, type) => {
+  if (!reputation) return []
+
+  return normalizeIocReputationItems(
+    reputation[type] ||
+      reputation[`${type}Reputation`] ||
+      reputation?.indicators?.[type] ||
+      []
+  )
+}
+
+const getIocRiskClass = (reputation) => {
+  const value = String(reputation || '').toLowerCase()
+
+  if (
+    value.includes('malicious') ||
+    value.includes('high') ||
+    value.includes('critical')
+  ) {
+    return 'text-red-400 bg-red-500/10 border-red-500/20'
+  }
+
+  if (
+    value.includes('suspicious') ||
+    value.includes('medium')
+  ) {
+    return 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20'
+  }
+
+  if (
+    value.includes('benign') ||
+    value.includes('safe') ||
+    value.includes('low')
+  ) {
+    return 'text-green-400 bg-green-500/10 border-green-500/20'
+  }
+
+  return 'text-slate-400 bg-slate-800/50 border-slate-700'
+}
+
 function AnalyzeEmail() {
   const [selectedFile, setSelectedFile] = useState(null)
 
@@ -866,6 +974,10 @@ function AnalyzeEmail() {
               aiAnalysis.attachmentForensics ||
               null,
 
+            iocReputation:
+              aiAnalysis.iocReputation ||
+              null,
+
             indicators:
               aiAnalysis.indicators || [],
 
@@ -1033,6 +1145,11 @@ function AnalyzeEmail() {
             riskFactors: [],
             recommendedActions: [],
           },
+
+        // IOC reputation intelligence
+        iocReputation:
+          aiAnalysis.iocReputation ||
+          null,
 
         location:
           'Pending Geo Intelligence',
@@ -2799,6 +2916,282 @@ Paste the complete email content here...`}
                   </div>
 
                 </div>
+
+              )}
+
+
+              {/* =========================================
+                  IOC REPUTATION INTELLIGENCE
+              ========================================= */}
+
+              {analysisResult.iocReputation && (
+
+                (() => {
+                  const urlItems = getIocReputationItems(
+                    analysisResult.iocReputation,
+                    'urls'
+                  )
+
+                  const domainItems = getIocReputationItems(
+                    analysisResult.iocReputation,
+                    'domains'
+                  )
+
+                  const ipItems = getIocReputationItems(
+                    analysisResult.iocReputation,
+                    'ips'
+                  )
+
+                  const allItems = [
+                    ...urlItems,
+                    ...domainItems,
+                    ...ipItems,
+                  ]
+
+                  if (allItems.length === 0) {
+                    return null
+                  }
+
+                  const renderIocCard = (
+                    type,
+                    item,
+                    index
+                  ) => {
+                    const riskScore = Math.min(
+                      100,
+                      Math.max(0, item.riskScore)
+                    )
+
+                    return (
+                      <div
+                        key={`${type}-${index}-${item.value}`}
+                        className="rounded-xl border border-slate-800 bg-slate-950 p-4"
+                      >
+
+                        <div>
+
+                          <div className="flex items-center justify-between gap-2">
+
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                              {type}
+                            </p>
+
+                            <div className="flex shrink-0 items-center gap-2">
+
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${getIocRiskClass(
+                                  item.reputation
+                                )}`}
+                              >
+                                {String(
+                                  item.reputation || 'UNKNOWN'
+                                ).toUpperCase()}
+                              </span>
+
+                              <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1 text-[11px] font-semibold text-purple-400">
+                                {riskScore}/100
+                              </span>
+
+                            </div>
+
+                          </div>
+
+                          <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/70 p-3">
+
+                            <p className="break-words font-mono text-xs leading-5 text-slate-300 [overflow-wrap:anywhere]">
+                              {item.value}
+                            </p>
+
+                          </div>
+
+                        </div>
+
+                        <div className="mt-3">
+
+                          <div className="flex items-center justify-between gap-3">
+
+                            <span className="text-[11px] text-slate-600">
+                              Reputation Risk Score
+                            </span>
+
+                            <span className="text-[11px] font-semibold text-slate-400">
+                              {riskScore}/100
+                            </span>
+
+                          </div>
+
+                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+
+                            <div
+                              className={`h-full rounded-full ${
+                                riskScore >= 70
+                                  ? 'bg-red-400'
+                                  : riskScore >= 40
+                                    ? 'bg-yellow-400'
+                                    : 'bg-green-400'
+                              }`}
+                              style={{
+                                width: `${riskScore}%`,
+                              }}
+                            ></div>
+
+                          </div>
+
+                        </div>
+
+                        {item.reasons?.length > 0 && (
+
+                          <div className="mt-4 border-t border-slate-800 pt-3">
+
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                              Reputation Factors
+                            </p>
+
+                            <div className="mt-2 space-y-2">
+
+                              {item.reasons
+                                .slice(0, 5)
+                                .map((reason, reasonIndex) => (
+
+                                  <div
+                                    key={reasonIndex}
+                                    className="flex items-start gap-2"
+                                  >
+
+                                    <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-purple-400"></span>
+
+                                    <p className="text-[11px] leading-5 text-slate-500">
+                                      {reason}
+                                    </p>
+
+                                  </div>
+
+                                ))}
+
+                            </div>
+
+                          </div>
+
+                        )}
+
+                      </div>
+                    )
+                  }
+
+                  return (
+                    <div className="mt-6 rounded-2xl border border-purple-500/20 bg-purple-500/5 p-5">
+
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                        <div className="flex items-start gap-3">
+
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-xl">
+                            🧠
+                          </div>
+
+                          <div>
+
+                            <p className="text-sm font-semibold text-purple-400">
+                              IOC Reputation Intelligence
+                            </p>
+
+                            <h3 className="mt-1 text-lg font-semibold text-slate-100">
+                              Indicator Risk Assessment
+                            </h3>
+
+                            <p className="mt-1 text-xs leading-5 text-slate-500">
+                              Individual URLs, domains and IP addresses
+                              are assessed separately from the overall
+                              email threat score.
+                            </p>
+
+                          </div>
+
+                        </div>
+
+                        <span className="rounded-full bg-purple-500/10 px-3 py-1 text-[11px] font-medium text-purple-400">
+                          {allItems.length} IOC
+                          {allItems.length !== 1 ? 's' : ''}
+                          {' '}assessed
+                        </span>
+
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+
+                        {urlItems.length > 0 && (
+                          <div className="space-y-3 lg:col-span-2">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-yellow-400">
+                              URLs ({urlItems.length})
+                            </p>
+
+                            {urlItems.map((item, index) =>
+                              renderIocCard(
+                                'URL',
+                                item,
+                                index
+                              )
+                            )}
+                          </div>
+                        )}
+
+                        {domainItems.length > 0 && (
+                          <div className="space-y-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-400">
+                              Domains ({domainItems.length})
+                            </p>
+
+                            {domainItems.map((item, index) =>
+                              renderIocCard(
+                                'Domain',
+                                item,
+                                index
+                              )
+                            )}
+                          </div>
+                        )}
+
+                        {ipItems.length > 0 && (
+                          <div className="space-y-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-orange-400">
+                              Source IPs ({ipItems.length})
+                            </p>
+
+                            {ipItems.map((item, index) =>
+                              renderIocCard(
+                                'IP',
+                                item,
+                                index
+                              )
+                            )}
+                          </div>
+                        )}
+
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-purple-500/10 bg-slate-950/70 p-4">
+
+                        <div className="flex items-start gap-3">
+
+                          <span className="text-sm">
+                            🔎
+                          </span>
+
+                          <p className="text-[11px] leading-5 text-slate-500">
+                            IOC reputation is an indicator-level
+                            assessment. It complements the overall
+                            TraceMail threat score and should be
+                            correlated with authentication, header,
+                            attachment and campaign evidence.
+                          </p>
+
+                        </div>
+
+                      </div>
+
+                    </div>
+                  )
+                })()
 
               )}
 
