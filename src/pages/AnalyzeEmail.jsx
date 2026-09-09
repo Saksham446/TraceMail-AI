@@ -488,6 +488,111 @@ function AnalyzeEmail() {
   }
 
   // =========================================
+  // FORENSIC EVIDENCE EXTRACTION
+  // =========================================
+
+  const buildForensicEvidence = ({
+    email,
+    evidenceHash,
+    subject,
+    sender,
+    recipient,
+    sourceIp,
+    domain,
+    authentication,
+    attachments,
+  }) => {
+    const urls = Array.from(
+      new Set(
+        email.match(/https?:\/\/[^\s<>\"']+/gi) || []
+      )
+    ).map((url) => url.replace(/[),.;]+$/, ''))
+
+    const ips = Array.from(
+      new Set(
+        email.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || []
+      )
+    )
+
+    const domains = Array.from(
+      new Set(
+        [
+          domain,
+          ...urls.map((url) => {
+            try {
+              return new URL(url).hostname
+            } catch {
+              return ''
+            }
+          }),
+        ].filter(Boolean)
+      )
+    )
+
+    const hashes = Array.from(
+      new Set(
+        [
+          evidenceHash,
+          ...attachments.map((attachment) => attachment.sha256),
+          ...(email.match(/\b[a-fA-F0-9]{64}\b/g) || []),
+        ].filter(Boolean)
+      )
+    )
+
+    const messageId = getHeaderValue(email, 'Message-ID') || 'Not available'
+    const returnPath = getHeaderValue(email, 'Return-Path') || 'Not available'
+    const date = getHeaderValue(email, 'Date') || 'Not available'
+    const receivedHeaders = email.match(/^Received:/gim) || []
+
+    return {
+      evidenceId: `TM-EVD-${Date.now().toString(36).toUpperCase()}`,
+      evidenceType: 'Email (.eml / raw email)',
+      collectionTimestamp: new Date().toISOString(),
+      integrity: {
+        algorithm: 'SHA-256',
+        hash: evidenceHash,
+        status: evidenceHash ? 'VERIFIED' : 'UNAVAILABLE',
+      },
+      emailArtifact: {
+        subject,
+        sender,
+        recipient,
+        messageId,
+        date,
+        returnPath,
+        receivedHopCount: receivedHeaders.length,
+      },
+      authentication: {
+        spf: authentication.spf,
+        dkim: authentication.dkim,
+        dmarc: authentication.dmarc,
+      },
+      indicatorsOfCompromise: {
+        ips,
+        domains,
+        urls,
+        hashes,
+      },
+      attachments: attachments.map((attachment) => ({
+        name: attachment.name,
+        type: attachment.type,
+        size: attachment.size,
+        extension: attachment.extension,
+        sha256: attachment.sha256,
+      })),
+      evidenceSummary: {
+        ipCount: ips.length,
+        domainCount: domains.length,
+        urlCount: urls.length,
+        hashCount: hashes.length,
+        attachmentCount: attachments.length,
+        receivedHopCount: receivedHeaders.length,
+      },
+      preservationStatus: 'PRESERVED',
+    }
+  }
+
+  // =========================================
   // ANALYZE EMAIL
   // =========================================
 
@@ -585,6 +690,27 @@ function AnalyzeEmail() {
 
       const authentication =
         getAuthentication(emailData)
+
+      // =========================================
+      // FORENSIC EVIDENCE RECORD
+      // =========================================
+
+      const forensicEvidence = buildForensicEvidence({
+        email: emailData,
+        evidenceHash,
+        subject,
+        sender,
+        recipient,
+        sourceIp,
+        domain,
+        authentication,
+        attachments,
+      })
+
+      localStorage.setItem(
+        'tracemail_forensic_evidence',
+        JSON.stringify(forensicEvidence)
+      )
 
       // =========================================
       // STEP 1 — SEND EMAIL TO AI SERVICE
@@ -805,6 +931,9 @@ function AnalyzeEmail() {
         // Evidence integrity
         evidenceHash,
         hashAlgorithm: 'SHA-256',
+
+        // Forensic evidence collection
+        forensicEvidence,
 
         // Automatic case creation
         caseCreated: true,
@@ -1618,6 +1747,135 @@ Paste the complete email content here...`}
                 </div>
 
               </div>
+
+              {/* =========================================
+                  FORENSIC EVIDENCE COLLECTION
+              ========================================= */}
+
+              {analysisResult.forensicEvidence && (
+                <div className="mt-6 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
+
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-xl">
+                        🧾
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-400">
+                          Forensic Evidence Collection
+                        </p>
+                        <h3 className="mt-1 text-lg font-semibold text-slate-100">
+                          Evidence Record & IOC Extraction
+                        </h3>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          Structured forensic artifacts extracted from the submitted email and preserved for investigation.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-emerald-500/20 bg-slate-950 px-4 py-3 text-right">
+                      <p className="text-xs text-slate-500">Evidence ID</p>
+                      <p className="mt-1 font-mono text-sm font-semibold text-emerald-400">
+                        {analysisResult.forensicEvidence.evidenceId}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {[
+                      ['IPs', analysisResult.forensicEvidence.evidenceSummary.ipCount],
+                      ['Domains', analysisResult.forensicEvidence.evidenceSummary.domainCount],
+                      ['URLs', analysisResult.forensicEvidence.evidenceSummary.urlCount],
+                      ['Attachments', analysisResult.forensicEvidence.evidenceSummary.attachmentCount],
+                    ].map(([label, value]) => (
+                      <div key={label} className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                        <p className="text-xs text-slate-500">{label} Extracted</p>
+                        <p className="mt-2 text-2xl font-bold text-slate-100">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-400">Email Artifact</p>
+                      <div className="mt-3 space-y-2 text-xs">
+                        {[
+                          ['Sender', analysisResult.forensicEvidence.emailArtifact.sender],
+                          ['Recipient', analysisResult.forensicEvidence.emailArtifact.recipient],
+                          ['Message-ID', analysisResult.forensicEvidence.emailArtifact.messageId],
+                          ['Return-Path', analysisResult.forensicEvidence.emailArtifact.returnPath],
+                          ['Received Hops', analysisResult.forensicEvidence.emailArtifact.receivedHopCount],
+                        ].map(([label, value]) => (
+                          <div key={label} className="flex items-start justify-between gap-4 border-b border-slate-800/70 pb-2 last:border-0 last:pb-0">
+                            <span className="text-slate-500">{label}</span>
+                            <span className="max-w-[70%] break-all text-right font-mono text-slate-300">{String(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-purple-400">Authentication Evidence</p>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        {Object.entries(analysisResult.forensicEvidence.authentication).map(([key, value]) => (
+                          <div key={key} className="rounded-lg border border-slate-800 bg-slate-900 p-3 text-center">
+                            <p className="text-[11px] uppercase text-slate-600">{key}</p>
+                            <p className={`mt-1 text-sm font-bold ${value === 'FAIL' ? 'text-red-400' : value === 'PASS' ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {value}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-orange-400">Indicators of Compromise</p>
+                      <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-medium text-emerald-400">
+                        {analysisResult.forensicEvidence.preservationStatus}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 space-y-3">
+                      {Object.entries(analysisResult.forensicEvidence.indicatorsOfCompromise).map(([type, values]) => (
+                        <div key={type}>
+                          <p className="text-xs font-medium capitalize text-slate-500">{type}</p>
+                          {values.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {values.slice(0, 12).map((value, index) => (
+                                <span key={`${type}-${index}`} className="max-w-full break-all rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 font-mono text-[11px] text-slate-300">
+                                  {value}
+                                </span>
+                              ))}
+                              {values.length > 12 && (
+                                <span className="px-2 py-1.5 text-[11px] text-slate-600">+{values.length - 12} more</span>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="mt-1 text-[11px] text-slate-700">None extracted</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-col gap-3 rounded-xl border border-emerald-500/10 bg-slate-950/70 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs text-slate-500">Evidence Preservation</p>
+                      <p className="mt-1 text-sm font-semibold text-emerald-400">✓ Evidence record preserved for investigation</p>
+                    </div>
+                    <div className="text-left sm:text-right">
+                      <p className="text-xs text-slate-500">Collection Time</p>
+                      <p className="mt-1 text-xs font-mono text-slate-300">
+                        {new Date(analysisResult.forensicEvidence.collectionTimestamp).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+
+                </div>
+              )}
 
               {/* =========================================
                   VOICE THREAT ALERT BANNER
