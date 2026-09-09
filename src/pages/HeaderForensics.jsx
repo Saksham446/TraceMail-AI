@@ -4,6 +4,7 @@ function HeaderForensics() {
   const [headerInput, setHeaderInput] = useState('')
   const [analysisStarted, setAnalysisStarted] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
+  const [aiAuthentication, setAiAuthentication] = useState(null)
 
   // =========================================
   // LOAD EMAIL SAVED FROM ANALYZE EMAIL
@@ -16,10 +17,39 @@ function HeaderForensics() {
       localStorage.getItem('analyzedEmail') ||
       localStorage.getItem('rawEmail')
 
+    // Load the latest AI analysis saved by Analyze Email.
+    let savedAiAnalysis = null
+
+    try {
+      const rawAiAnalysis =
+        localStorage.getItem('tracemail_ai_analysis')
+
+      if (rawAiAnalysis) {
+        const parsed = JSON.parse(rawAiAnalysis)
+
+        savedAiAnalysis =
+          parsed?.analysis ||
+          parsed ||
+          null
+      }
+    } catch (error) {
+      console.warn(
+        'Unable to read saved AI analysis:',
+        error
+      )
+    }
+
+    if (savedAiAnalysis?.authentication) {
+      setAiAuthentication(savedAiAnalysis.authentication)
+    }
+
     if (savedEmail && savedEmail.trim()) {
       setHeaderInput(savedEmail)
 
-      const result = analyzeHeaders(savedEmail)
+      const result = analyzeHeaders(
+        savedEmail,
+        savedAiAnalysis
+      )
 
       setAnalysisResult(result)
       setAnalysisStarted(true)
@@ -258,7 +288,7 @@ function HeaderForensics() {
   // ANALYZE HEADERS
   // =========================================
 
-  const analyzeHeaders = (email) => {
+  const analyzeHeaders = (email, savedAiAnalysis = null) => {
     const from =
       getHeaderValue(email, 'From')
 
@@ -280,8 +310,42 @@ function HeaderForensics() {
     const date =
       getHeaderValue(email, 'Date')
 
-    const authentication =
+    const parsedAuthentication =
       getAuthentication(email)
+
+    // If the submitted email does not contain real
+    // Authentication-Results headers, use the authentication
+    // result already produced by the TraceMail AI analysis.
+    const aiAuthenticationResult =
+      savedAiAnalysis?.authentication ||
+      aiAuthentication ||
+      null
+
+    const authentication = {
+      spf:
+        parsedAuthentication.spf !== 'UNKNOWN'
+          ? parsedAuthentication.spf
+          : aiAuthenticationResult?.spf || 'UNKNOWN',
+
+      dkim:
+        parsedAuthentication.dkim !== 'UNKNOWN'
+          ? parsedAuthentication.dkim
+          : aiAuthenticationResult?.dkim || 'UNKNOWN',
+
+      dmarc:
+        parsedAuthentication.dmarc !== 'UNKNOWN'
+          ? parsedAuthentication.dmarc
+          : aiAuthenticationResult?.dmarc || 'UNKNOWN',
+    }
+
+    const authenticationSource =
+      parsedAuthentication.spf !== 'UNKNOWN' ||
+      parsedAuthentication.dkim !== 'UNKNOWN' ||
+      parsedAuthentication.dmarc !== 'UNKNOWN'
+        ? 'Header evidence'
+        : aiAuthenticationResult
+          ? 'AI analysis'
+          : 'Not available'
 
     const receivedChain =
       parseReceivedHeaders(email)
@@ -449,7 +513,7 @@ function HeaderForensics() {
         type: 'warning',
         title: 'Authentication results unavailable',
         description:
-          'No SPF, DKIM or DMARC result was found in the submitted Authentication-Results headers.',
+          'No SPF, DKIM or DMARC result was found in the submitted evidence or the saved AI analysis.',
       })
     }
 
@@ -541,6 +605,8 @@ function HeaderForensics() {
 
       authentication,
 
+      authenticationSource,
+
       receivedChain,
 
       riskScore,
@@ -571,8 +637,36 @@ function HeaderForensics() {
       headerInput
     )
 
+    let savedAiAnalysis = null
+
+    try {
+      const rawAiAnalysis =
+        localStorage.getItem('tracemail_ai_analysis')
+
+      if (rawAiAnalysis) {
+        const parsed = JSON.parse(rawAiAnalysis)
+
+        savedAiAnalysis =
+          parsed?.analysis ||
+          parsed ||
+          null
+      }
+    } catch (error) {
+      console.warn(
+        'Unable to read saved AI analysis:',
+        error
+      )
+    }
+
+    if (savedAiAnalysis?.authentication) {
+      setAiAuthentication(savedAiAnalysis.authentication)
+    }
+
     const result =
-      analyzeHeaders(headerInput)
+      analyzeHeaders(
+        headerInput,
+        savedAiAnalysis
+      )
 
     setAnalysisResult(result)
     setAnalysisStarted(true)
@@ -586,6 +680,7 @@ function HeaderForensics() {
     setHeaderInput('')
     setAnalysisStarted(false)
     setAnalysisResult(null)
+    setAiAuthentication(null)
 
     localStorage.removeItem(
       'tracemailRawEmail'
@@ -1249,6 +1344,18 @@ Paste complete email headers here...`}
               </div>
 
               {analysisStarted && analysisResult && (
+                <div className="mt-4 flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 px-3 py-2">
+                  <span className="text-xs text-slate-600">
+                    Authentication source
+                  </span>
+
+                  <span className="text-xs font-medium text-cyan-400">
+                    {analysisResult.authenticationSource || 'Not available'}
+                  </span>
+                </div>
+              )}
+
+              {analysisStarted && analysisResult && (
                 <div
                   className={`mt-5 rounded-xl border p-4 ${
                     hasAuthenticationRisk
@@ -1272,7 +1379,9 @@ Paste complete email headers here...`}
                   <p className="mt-1 text-xs leading-5 text-slate-600">
                     {hasAuthenticationRisk
                       ? 'One or more authentication checks failed and should be correlated with sender identity and routing evidence.'
-                      : 'No authentication failures were detected in the supplied Authentication-Results header.'}
+                      : analysisResult.authenticationSource === 'AI analysis'
+                        ? 'Authentication results were supplied by the TraceMail AI analysis because the pasted evidence does not contain Authentication-Results headers.'
+                        : 'No authentication failures were detected in the supplied Authentication-Results header.'}
                   </p>
 
                 </div>

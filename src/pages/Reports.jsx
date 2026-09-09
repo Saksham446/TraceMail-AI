@@ -3,7 +3,32 @@ import { useEffect, useMemo, useState } from 'react'
 const TICKETS_API = 'http://localhost:5001/api/tickets'
 const REPORTS_API = 'http://localhost:5001/api/reports'
 
+function getStoredUser() {
+  try {
+    return JSON.parse(
+      localStorage.getItem('tracemail_user') || 'null',
+    )
+  } catch {
+    return null
+  }
+}
+
+function getAuthHeaders(includeJson = false) {
+  const token = localStorage.getItem('tracemail_auth_token')
+
+  return {
+    ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+}
+
 export default function Reports() {
+  const currentUser = getStoredUser()
+
+  const canGenerateReport =
+    currentUser?.role === 'Admin' ||
+    currentUser?.role === 'Analyst'
+
   const [reports, setReports] = useState([])
   const [selectedReport, setSelectedReport] = useState(null)
 
@@ -28,8 +53,12 @@ export default function Reports() {
       setError('')
 
       const [ticketsResponse, reportsResponse] = await Promise.all([
-        fetch(TICKETS_API),
-        fetch(REPORTS_API),
+        fetch(TICKETS_API, {
+          headers: getAuthHeaders(),
+        }),
+        fetch(REPORTS_API, {
+          headers: getAuthHeaders(),
+        }),
       ])
 
       if (!ticketsResponse.ok) {
@@ -154,6 +183,11 @@ export default function Reports() {
   // =========================================
 
   const handleGenerate = async () => {
+    if (!canGenerateReport) {
+      setShowGenerator(false)
+      return
+    }
+
     if (reports.length === 0) {
       setShowGenerator(false)
       return
@@ -212,9 +246,7 @@ export default function Reports() {
       const response = await fetch(REPORTS_API, {
         method: 'POST',
 
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(true),
 
         body: JSON.stringify(generatedReportPayload),
       })
@@ -655,8 +687,10 @@ TraceMail AI • Forensic Intelligence Platform
 
         </div>
 
+        {canGenerateReport && (
+          <>
         {/* REPORT GENERATOR */}
-
+          
         <section className="mt-6 rounded-2xl border border-cyan-500/20 bg-slate-900 p-6">
 
           <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
@@ -718,6 +752,9 @@ TraceMail AI • Forensic Intelligence Platform
           </div>
 
         </section>
+
+          </>
+        )}
 
         {/* FILTERS */}
 
@@ -1066,7 +1103,7 @@ TraceMail AI • Forensic Intelligence Platform
 
       {/* GENERATE REPORT MODAL */}
 
-      {showGenerator && (
+      {showGenerator && canGenerateReport && (
 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-6 backdrop-blur-sm">
 

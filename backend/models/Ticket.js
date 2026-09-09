@@ -1,5 +1,47 @@
 const mongoose = require("mongoose");
 
+// =========================================
+// AUDIT / CHAIN OF CUSTODY SCHEMA
+// =========================================
+
+const auditEventSchema = new mongoose.Schema(
+  {
+    action: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    actor: {
+      type: String,
+      default: "TraceMail AI",
+      trim: true,
+    },
+
+    details: {
+      type: String,
+      trim: true,
+    },
+
+    evidenceHash: {
+      type: String,
+      trim: true,
+    },
+
+    timestamp: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
+// =========================================
+// TICKET SCHEMA
+// =========================================
+
 const ticketSchema = new mongoose.Schema(
   {
     ticketId: {
@@ -7,6 +49,55 @@ const ticketSchema = new mongoose.Schema(
       unique: true,
       required: true,
     },
+
+    // =========================================
+    // AUTOMATIC CASE CREATION
+    // =========================================
+
+    autoCreated: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    caseType: {
+      type: String,
+      enum: ["Automatic", "Standard"],
+      default: "Standard",
+    },
+
+    caseTrigger: {
+      type: String,
+      trim: true,
+    },
+
+    // =========================================
+    // EVIDENCE INTEGRITY
+    // =========================================
+
+    evidenceHash: {
+      type: String,
+      trim: true,
+      index: true,
+    },
+
+    hashAlgorithm: {
+      type: String,
+      default: "SHA-256",
+    },
+
+    // =========================================
+    // CHAIN OF CUSTODY
+    // =========================================
+
+    auditTimeline: {
+      type: [auditEventSchema],
+      default: [],
+    },
+
+    // =========================================
+    // EMAIL INFORMATION
+    // =========================================
 
     subject: {
       type: String,
@@ -30,6 +121,10 @@ const ticketSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // =========================================
+    // THREAT CLASSIFICATION
+    // =========================================
+
     category: {
       type: String,
       enum: [
@@ -46,15 +141,28 @@ const ticketSchema = new mongoose.Schema(
 
     priority: {
       type: String,
-      enum: ["Low", "Medium", "High", "Critical"],
+      enum: [
+        "Low",
+        "Medium",
+        "High",
+        "Critical",
+      ],
       default: "Medium",
     },
 
     status: {
       type: String,
-      enum: ["Open", "Investigating", "Resolved"],
+      enum: [
+        "Open",
+        "Investigating",
+        "Resolved",
+      ],
       default: "Open",
     },
+
+    // =========================================
+    // AI THREAT INTELLIGENCE
+    // =========================================
 
     threatScore: {
       type: Number,
@@ -70,20 +178,30 @@ const ticketSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // =========================================
+    // EMAIL AUTHENTICATION
+    // =========================================
+
     authentication: {
       spf: {
         type: String,
         default: "UNKNOWN",
       },
+
       dkim: {
         type: String,
         default: "UNKNOWN",
       },
+
       dmarc: {
         type: String,
         default: "UNKNOWN",
       },
     },
+
+    // =========================================
+    // SOURCE INTELLIGENCE
+    // =========================================
 
     sourceIp: {
       type: String,
@@ -102,6 +220,10 @@ const ticketSchema = new mongoose.Schema(
       },
     ],
 
+    // =========================================
+    // INVESTIGATION WORKFLOW
+    // =========================================
+
     assignedTeam: {
       type: String,
       default: "Threat Intelligence",
@@ -117,4 +239,7 @@ const ticketSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("Ticket", ticketSchema);
+module.exports = mongoose.model(
+  "Ticket",
+  ticketSchema
+);

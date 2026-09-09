@@ -12,6 +12,169 @@ const LEGACY_STORAGE_KEYS = [
   'rawEmail',
 ]
 
+
+// =========================================
+// MIME / ATTACHMENT FORENSICS HELPERS
+// =========================================
+
+const getMimeHeader = (headers, headerName) => {
+  const regex = new RegExp(
+    `(?:^|\\r?\\n)${headerName}:\\s*([^\\r\\n]*(?:\\r?\\n[ \\t]+[^\\r\\n]*)*)`,
+    'i'
+  )
+
+  const match = headers.match(regex)
+
+  return match
+    ? match[1].replace(/\\r?\\n[ \\t]+/g, ' ').trim()
+    : ''
+}
+
+const decodeBase64ToBytes = (value) => {
+  try {
+    const cleaned = String(value || '').replace(/\\s/g, '')
+    const binary = window.atob(cleaned)
+    const bytes = new Uint8Array(binary.length)
+
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+
+    return bytes
+  } catch (error) {
+    console.warn('Unable to decode attachment base64:', error)
+    return new Uint8Array()
+  }
+}
+
+const generateBytesHash = async (bytes) => {
+  const hashBuffer = await crypto.subtle.digest(
+    'SHA-256',
+    bytes
+  )
+
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+const getAttachmentExtension = (name) => {
+  const cleanName = String(name || '').trim().toLowerCase()
+
+  if (!cleanName.includes('.')) {
+    return ''
+  }
+
+  return `.${cleanName.split('.').pop()}`
+}
+
+const extractAttachmentsFromEmail = async (email) => {
+  const attachments = []
+
+  if (!email || !email.includes('multipart/')) {
+    return attachments
+  }
+
+  const contentType = getMimeHeader(email, 'Content-Type')
+  const boundaryMatch = contentType.match(
+    /boundary\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i
+  )
+
+  if (!boundaryMatch) {
+    return attachments
+  }
+
+  const boundary =
+    boundaryMatch[1] ||
+    boundaryMatch[2] ||
+    boundaryMatch[3]
+
+  const parts = email.split(`--${boundary}`)
+
+  for (const part of parts) {
+    const separatorMatch = part.match(/\r?\n\r?\n/)
+
+    if (!separatorMatch) {
+      continue
+    }
+
+    const separatorIndex = separatorMatch.index
+    const headers = part.slice(0, separatorIndex)
+    const body = part
+      .slice(separatorIndex + separatorMatch[0].length)
+      .replace(/\r?\n--?\s*$/, '')
+      .trim()
+
+    const disposition = getMimeHeader(
+      headers,
+      'Content-Disposition'
+    )
+
+    const filenameMatch = disposition.match(
+      /filename\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i
+    )
+
+    const nameMatch = getMimeHeader(
+      headers,
+      'Content-Type'
+    ).match(
+      /name\s*=\s*(?:"([^"]+)"|'([^']+)'|([^;\s]+))/i
+    )
+
+    const name =
+      filenameMatch?.[1] ||
+      filenameMatch?.[2] ||
+      filenameMatch?.[3] ||
+      nameMatch?.[1] ||
+      nameMatch?.[2] ||
+      nameMatch?.[3] ||
+      ''
+
+    const isAttachment =
+      /\battachment\b/i.test(disposition) ||
+      Boolean(filenameMatch) ||
+      Boolean(nameMatch)
+
+    if (!isAttachment || !name) {
+      continue
+    }
+
+    const typeHeader = getMimeHeader(
+      headers,
+      'Content-Type'
+    )
+
+    const contentTypeValue =
+      typeHeader.split(';')[0].trim() ||
+      'application/octet-stream'
+
+    const transferEncoding = getMimeHeader(
+      headers,
+      'Content-Transfer-Encoding'
+    ).toLowerCase()
+
+    let bytes
+
+    if (transferEncoding.includes('base64')) {
+      bytes = decodeBase64ToBytes(body)
+    } else {
+      bytes = new TextEncoder().encode(body)
+    }
+
+    const sha256 = await generateBytesHash(bytes)
+
+    attachments.push({
+      name,
+      type: contentTypeValue,
+      size: bytes.length,
+      extension: getAttachmentExtension(name),
+      sha256,
+    })
+  }
+
+  return attachments
+}
+
 const getSavedEmail = () => {
   const keys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS]
 
@@ -55,6 +218,7 @@ function AnalyzeEmail() {
   const [analysisResult, setAnalysisResult] = useState(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [error, setError] = useState('')
+  const [caseCreationStatus, setCaseCreationStatus] = useState(null)
 
   // =========================================
   // VOICE THREAT ALERT
@@ -68,7 +232,6 @@ function AnalyzeEmail() {
 
     const severity = String(result.severity || '').toLowerCase()
 
-    // Voice alert is intentionally limited to high-risk threats.
     if (severity !== 'critical' && severity !== 'high') {
       return
     }
@@ -195,8 +358,6 @@ function AnalyzeEmail() {
       (severity === 'critical' ||
         severity === 'high')
     ) {
-      // Small delay gives the browser time to finish the
-      // analysis/render cycle before starting speech.
       const timer = setTimeout(() => {
         speakThreatAlert(analysisResult)
       }, 250)
@@ -303,18 +464,45 @@ function AnalyzeEmail() {
   }
 
   // =========================================
+  // SHA-256 EVIDENCE HASH
+  // =========================================
+
+  const generateEvidenceHash = async (emailContent) => {
+    const encoder = new TextEncoder()
+    const data = encoder.encode(emailContent)
+
+    const hashBuffer = await crypto.subtle.digest(
+      'SHA-256',
+      data
+    )
+
+    const hashArray = Array.from(
+      new Uint8Array(hashBuffer)
+    )
+
+    return hashArray
+      .map((byte) =>
+        byte.toString(16).padStart(2, '0')
+      )
+      .join('')
+  }
+
+  // =========================================
   // ANALYZE EMAIL
   // =========================================
 
   const handleAnalyze = async () => {
     if (!selectedFile && !rawEmail.trim()) {
-      setError('Please upload an email or paste email content first.')
+      setError(
+        'Please upload an email or paste email content first.'
+      )
       return
     }
 
     setIsAnalyzing(true)
     setAnalysisStarted(false)
     setAnalysisResult(null)
+    setCaseCreationStatus(null)
     setError('')
 
     try {
@@ -329,8 +517,41 @@ function AnalyzeEmail() {
       }
 
       if (!emailData.trim()) {
-        throw new Error('Unable to read email content.')
+        throw new Error(
+          'Unable to read email content.'
+        )
       }
+
+      // =========================================
+      // EXTRACT ATTACHMENTS FOR FORENSIC ANALYSIS
+      // =========================================
+
+      console.log(
+        '📎 Extracting email attachments for forensic analysis...'
+      )
+
+      const attachments =
+        await extractAttachmentsFromEmail(emailData)
+
+      console.log(
+        `📎 Attachments detected: ${attachments.length}`
+      )
+
+      // =========================================
+      // GENERATE SHA-256 EVIDENCE HASH
+      // =========================================
+
+      console.log(
+        '🔐 Generating SHA-256 evidence hash...'
+      )
+
+      const evidenceHash =
+        await generateEvidenceHash(emailData)
+
+      console.log(
+        '🔐 Evidence SHA-256:',
+        evidenceHash
+      )
 
       // =========================================
       // SAVE EMAIL FOR OTHER MODULES
@@ -369,13 +590,22 @@ function AnalyzeEmail() {
       // STEP 1 — SEND EMAIL TO AI SERVICE
       // =========================================
 
-      console.log('🤖 Sending email to TraceMail AI...')
+      console.log(
+        '🤖 Sending email to TraceMail AI...'
+      )
+
+      const token = localStorage.getItem('tracemail_auth_token')
+
+      const authHeaders = {
+        'Content-Type': 'application/json',
+        ...(token
+          ? { Authorization: `Bearer ${token}` }
+          : {}),
+      }
 
       const aiResponse = await fetch(AI_API_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: authHeaders,
         body: JSON.stringify({
           subject,
           sender,
@@ -385,6 +615,7 @@ function AnalyzeEmail() {
           dmarc: authentication.dmarc,
           sourceIp,
           domain,
+          attachments,
         }),
       })
 
@@ -392,13 +623,30 @@ function AnalyzeEmail() {
 
       if (!aiResponse.ok || !aiData.success) {
         throw new Error(
-          aiData.message || 'AI analysis failed.'
+          aiData.message ||
+            'AI analysis failed.'
         )
       }
 
-      console.log('✅ AI analysis received')
+      console.log(
+        '✅ AI analysis received'
+      )
 
       const aiAnalysis = aiData.analysis
+
+      // =========================================
+      // AUTOMATIC CASE CREATION DECISION
+      // =========================================
+
+      const automaticCase =
+        aiAnalysis.severity === 'Critical' ||
+        aiAnalysis.severity === 'High'
+
+      console.log(
+        automaticCase
+          ? '🚨 High/Critical threat — automatic case creation triggered'
+          : 'ℹ️ Lower severity — standard investigation record'
+      )
 
       // =========================================
       // STEP 2 — CREATE TICKET ID
@@ -413,79 +661,140 @@ function AnalyzeEmail() {
       // STEP 3 — STORE RESULT IN MONGODB
       // =========================================
 
-      console.log('🗄️ Saving investigation to backend...')
+      console.log(
+        '🗄️ Saving investigation to backend...'
+      )
 
-      const ticketResponse = await fetch(TICKET_API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ticketId,
-          subject,
-          sender,
-          recipient,
-          emailBody: emailData,
+      const ticketResponse = await fetch(
+        TICKET_API_URL,
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            ticketId,
+            subject,
+            sender,
+            recipient,
+            emailBody: emailData,
 
-          category:
-            aiAnalysis.category || 'Suspicious',
+            // Evidence integrity
+            evidenceHash,
+            hashAlgorithm: 'SHA-256',
 
-          priority:
-            aiAnalysis.priority || 'Medium',
+            category:
+              aiAnalysis.category ||
+              'Suspicious',
 
-          status: 'Investigating',
+            priority:
+              aiAnalysis.priority ||
+              'Medium',
 
-          threatScore:
-            aiAnalysis.threatScore || 0,
+            status: automaticCase
+              ? 'Open'
+              : 'Investigating',
 
-          aiConfidence:
-            aiAnalysis.confidence || 0,
+            // Automatic case creation metadata
+            caseType: automaticCase
+              ? 'Automatic'
+              : 'Standard',
 
-          authentication: {
-            spf:
-              aiAnalysis.authentication?.spf ||
-              authentication.spf,
+            autoCreated: automaticCase,
 
-            dkim:
-              aiAnalysis.authentication?.dkim ||
-              authentication.dkim,
+            caseTrigger: automaticCase
+              ? `Automatically created because threat severity is ${aiAnalysis.severity} with a threat score of ${aiAnalysis.threatScore}/100.`
+              : 'Created as a standard investigation record.',
 
-            dmarc:
-              aiAnalysis.authentication?.dmarc ||
-              authentication.dmarc,
-          },
+            threatScore:
+              aiAnalysis.threatScore || 0,
 
-          sourceIp:
-            aiAnalysis.sourceIp || sourceIp,
+            aiConfidence:
+              aiAnalysis.confidence || 0,
 
-          domain:
-            aiAnalysis.domain || domain,
+            authentication: {
+              spf:
+                aiAnalysis.authentication?.spf ||
+                authentication.spf,
 
-          indicators:
-            aiAnalysis.indicators || [],
+              dkim:
+                aiAnalysis.authentication?.dkim ||
+                authentication.dkim,
 
-          assignedTeam:
-            'Threat Intelligence',
+              dmarc:
+                aiAnalysis.authentication?.dmarc ||
+                authentication.dmarc,
+            },
 
-          recommendedSolution:
-            aiAnalysis.recommendedActions?.join(' ') ||
-            'Verify sender identity, investigate source IP and suspicious indicators, and block malicious infrastructure if confirmed.',
-        }),
-      })
+            sourceIp:
+              aiAnalysis.sourceIp ||
+              sourceIp,
 
-      const ticketData = await ticketResponse.json()
+            domain:
+              aiAnalysis.domain ||
+              domain,
 
-      if (!ticketResponse.ok || !ticketData.success) {
+            attachments:
+              aiAnalysis.attachments ||
+              attachments,
+
+            attachmentForensics:
+              aiAnalysis.attachmentForensics ||
+              null,
+
+            indicators:
+              aiAnalysis.indicators || [],
+
+            assignedTeam:
+              'Threat Intelligence',
+
+            recommendedSolution:
+              aiAnalysis.recommendedActions?.join(
+                ' '
+              ) ||
+              'Verify sender identity, investigate source IP and suspicious indicators, and block malicious infrastructure if confirmed.',
+          }),
+        }
+      )
+
+      const ticketData =
+        await ticketResponse.json()
+
+      if (
+        !ticketResponse.ok ||
+        !ticketData.success
+      ) {
         throw new Error(
           ticketData.message ||
             'Failed to store investigation in database.'
         )
       }
 
-      console.log('✅ Investigation stored successfully')
+      console.log(
+        '✅ Investigation stored successfully'
+      )
 
-      // Save the exact analyzed evidence again so Header Forensics,
-      // Geo Intelligence and other modules can reuse it.
+      // =========================================
+      // AUTOMATIC CASE CREATION STATUS
+      // =========================================
+
+      setCaseCreationStatus({
+        created: true,
+        type: automaticCase ? 'Automatic' : 'Standard',
+        ticketId,
+        severity: aiAnalysis.severity || 'Medium',
+        threatScore: aiAnalysis.threatScore ?? 0,
+      })
+
+      if (automaticCase) {
+        console.log(
+          `🚨 Automatic case created: ${ticketId}`
+        )
+      } else {
+        console.log(
+          `📋 Standard investigation created: ${ticketId}`
+        )
+      }
+
+      // Save exact analyzed evidence again
       saveEmailEvidence(emailData)
 
       // =========================================
@@ -493,26 +802,58 @@ function AnalyzeEmail() {
       // =========================================
 
       setAnalysisResult({
+        // Evidence integrity
+        evidenceHash,
+        hashAlgorithm: 'SHA-256',
+
+        // Automatic case creation
+        caseCreated: true,
+        caseType: automaticCase
+          ? 'Automatic'
+          : 'Standard',
+        caseId: ticketId,
+        caseStatus: automaticCase
+          ? 'Open'
+          : 'Investigating',
+        caseTrigger: automaticCase
+          ? `Automatically created because threat severity is ${aiAnalysis.severity} with a threat score of ${aiAnalysis.threatScore}/100.`
+          : 'Created as a standard investigation record.',
+
         threatScore:
           aiAnalysis.threatScore ?? 0,
 
+        // =========================================
+        // EXPLAINABLE THREAT SCORE
+        // =========================================
+
+        scoreBreakdown:
+          aiAnalysis.scoreBreakdown || [],
+
+        scoreExplanation:
+          aiAnalysis.scoreExplanation || null,
+
         classification:
-          aiAnalysis.classification || 'Unknown',
+          aiAnalysis.classification ||
+          'Unknown',
 
         confidence:
           aiAnalysis.confidence ?? 0,
 
         priority:
-          aiAnalysis.priority || 'Medium',
+          aiAnalysis.priority ||
+          'Medium',
 
         severity:
-          aiAnalysis.severity || 'Medium',
+          aiAnalysis.severity ||
+          'Medium',
 
         category:
-          aiAnalysis.category || 'Suspicious',
+          aiAnalysis.category ||
+          'Suspicious',
 
         authentication:
-          aiAnalysis.authentication || authentication,
+          aiAnalysis.authentication ||
+          authentication,
 
         indicators:
           aiAnalysis.indicatorCount ??
@@ -541,10 +882,28 @@ function AnalyzeEmail() {
           0,
 
         sourceIp:
-          aiAnalysis.sourceIp || sourceIp,
+          aiAnalysis.sourceIp ||
+          sourceIp,
 
         domain:
-          aiAnalysis.domain || domain,
+          aiAnalysis.domain ||
+          domain,
+
+        attachments:
+          aiAnalysis.attachments ||
+          attachments,
+
+        attachmentForensics:
+          aiAnalysis.attachmentForensics ||
+          {
+            attachmentCount: attachments.length,
+            suspiciousAttachmentCount: 0,
+            riskPoints: 0,
+            riskLevel: 'Low',
+            findings: [],
+            riskFactors: [],
+            recommendedActions: [],
+          },
 
         location:
           'Pending Geo Intelligence',
@@ -553,12 +912,16 @@ function AnalyzeEmail() {
       setAnalysisStarted(true)
 
     } catch (error) {
-      console.error('Analysis error:', error)
+      console.error(
+        'Analysis error:',
+        error
+      )
 
       setError(
         error.message ||
           'Unable to connect to TraceMail AI services.'
       )
+
     } finally {
       setIsAnalyzing(false)
     }
@@ -588,7 +951,9 @@ function AnalyzeEmail() {
   // CLASSIFICATION COLOR
   // =========================================
 
-  const getClassificationClass = (classification) => {
+  const getClassificationClass = (
+    classification
+  ) => {
     if (classification === 'Malicious') {
       return 'text-red-400'
     }
@@ -618,9 +983,9 @@ function AnalyzeEmail() {
         </h1>
 
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-          Upload a raw email or paste complete email headers to detect
-          phishing, impersonation, fraud indicators and suspicious
-          sender infrastructure.
+          Upload a raw email or paste complete email headers
+          to detect phishing, impersonation, fraud indicators
+          and suspicious sender infrastructure.
         </p>
 
       </div>
@@ -772,8 +1137,6 @@ function AnalyzeEmail() {
 
                 setRawEmail(value)
 
-                // Save email so other investigation modules
-                // can reuse the same evidence.
                 if (value.trim()) {
                   saveEmailEvidence(value)
                 } else {
@@ -892,7 +1255,8 @@ Paste the complete email content here...`}
                   type="button"
                   onClick={handleAnalyze}
                   disabled={
-                    (!selectedFile && !rawEmail.trim()) ||
+                    (!selectedFile &&
+                      !rawEmail.trim()) ||
                     isAnalyzing
                   }
                   className="shrink-0 rounded-lg bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
@@ -905,6 +1269,8 @@ Paste the complete email content here...`}
                 </button>
 
               </div>
+
+            </div>
 
             {/* =========================================
                 VOICE ALERT STATUS
@@ -929,8 +1295,6 @@ Paste the complete email content here...`}
                   • High/Critical threats trigger a spoken security alert
                 </p>
               )}
-
-            </div>
 
             </div>
 
@@ -1026,6 +1390,102 @@ Paste the complete email content here...`}
 
             <div className="rounded-2xl border border-cyan-500/20 bg-slate-900 p-6">
 
+              {/* =========================================
+                  AUTOMATIC CASE CREATION STATUS
+              ========================================= */}
+
+              {caseCreationStatus && (
+
+                <div
+                  className={`mb-6 rounded-xl border p-5 ${
+                    caseCreationStatus.type === 'Automatic'
+                      ? 'border-red-500/30 bg-red-500/5'
+                      : 'border-cyan-500/20 bg-cyan-500/5'
+                  }`}
+                >
+
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+                    <div className="flex items-start gap-3">
+
+                      <div
+                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+                          caseCreationStatus.type === 'Automatic'
+                            ? 'bg-red-500/10'
+                            : 'bg-cyan-500/10'
+                        }`}
+                      >
+                        {caseCreationStatus.type === 'Automatic'
+                          ? '🚨'
+                          : '📋'}
+                      </div>
+
+                      <div>
+
+                        <p
+                          className={`text-sm font-semibold ${
+                            caseCreationStatus.type === 'Automatic'
+                              ? 'text-red-400'
+                              : 'text-cyan-400'
+                          }`}
+                        >
+                          {caseCreationStatus.type === 'Automatic'
+                            ? 'Automatic Case Created'
+                            : 'Investigation Record Created'}
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          {caseCreationStatus.type === 'Automatic'
+                            ? `TraceMail automatically created a case because this email was classified as ${caseCreationStatus.severity} risk.`
+                            : 'The investigation has been stored successfully for further analysis.'}
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                    <div className="rounded-lg border border-slate-800 bg-slate-950 px-4 py-3">
+
+                      <p className="text-xs text-slate-600">
+                        Case ID
+                      </p>
+
+                      <p className="mt-1 font-mono text-sm font-semibold text-slate-200">
+                        {caseCreationStatus.ticketId}
+                      </p>
+
+                    </div>
+
+                  </div>
+
+                  {caseCreationStatus.type === 'Automatic' && (
+
+                    <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-red-500/10 pt-4">
+
+                      <span className="rounded-full bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
+                        AUTO-CREATED
+                      </span>
+
+                      <span className="rounded-full bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-400">
+                        {caseCreationStatus.severity}
+                      </span>
+
+                      <span className="rounded-full bg-purple-500/10 px-3 py-1 text-xs font-medium text-purple-400">
+                        Threat Score: {caseCreationStatus.threatScore}/100
+                      </span>
+
+                      <span className="text-xs text-slate-600">
+                        Investigation workflow initiated automatically
+                      </span>
+
+                    </div>
+
+                  )}
+
+                </div>
+
+              )}
+
               {/* RESULT HEADER */}
 
               <div className="flex flex-col items-start justify-between gap-6 lg:flex-row">
@@ -1086,6 +1546,72 @@ Paste the complete email content here...`}
                     <p className="mt-1 text-sm font-semibold">
                       {analysisResult.severity}
                     </p>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+              {/* =========================================
+                  EVIDENCE INTEGRITY
+              ========================================= */}
+
+              <div className="mt-6 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-5">
+
+                <div className="flex items-start gap-3">
+
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10 text-lg">
+                    🔐
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+
+                    <p className="text-sm font-medium text-cyan-400">
+                      Evidence Integrity
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      Cryptographic fingerprint generated for the submitted email evidence.
+                    </p>
+
+                    <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950 p-4">
+
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+
+                        <span className="text-xs text-slate-500">
+                          Hash Algorithm
+                        </span>
+
+                        <span className="text-xs font-semibold text-green-400">
+                          {analysisResult.hashAlgorithm || 'SHA-256'}
+                        </span>
+
+                      </div>
+
+                      <div className="mt-3">
+
+                        <p className="text-xs text-slate-500">
+                          Evidence Hash
+                        </p>
+
+                        <p className="mt-2 break-all font-mono text-xs leading-5 text-slate-300">
+                          {analysisResult.evidenceHash}
+                        </p>
+
+                      </div>
+
+                      <div className="mt-3 flex items-center gap-2">
+
+                        <span className="h-2 w-2 rounded-full bg-green-400"></span>
+
+                        <span className="text-xs text-green-400">
+                          Evidence fingerprint generated
+                        </span>
+
+                      </div>
+
+                    </div>
 
                   </div>
 
@@ -1256,6 +1782,274 @@ Paste the complete email content here...`}
               </div>
 
               {/* =========================================
+                  EXPLAINABLE THREAT SCORE
+              ========================================= */}
+
+              {analysisResult.scoreBreakdown?.length > 0 && (
+
+                <div className="mt-6 rounded-2xl border border-purple-500/20 bg-purple-500/5 p-5">
+
+                  {/* HEADER */}
+
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+
+                    <div className="flex items-start gap-3">
+
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-500/10 text-xl">
+                        🧠
+                      </div>
+
+                      <div>
+
+                        <p className="text-sm font-semibold text-purple-400">
+                          Why This Score?
+                        </p>
+
+                        <h3 className="mt-1 text-lg font-semibold text-slate-100">
+                          Explainable Threat Score
+                        </h3>
+
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          Every score contribution is shown transparently
+                          so investigators can understand why this email
+                          received its risk rating.
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                    <div className="rounded-xl border border-purple-500/20 bg-slate-950 px-4 py-3 text-right">
+
+                      <p className="text-xs text-slate-500">
+                        Final Score
+                      </p>
+
+                      <p className="mt-1 text-2xl font-bold text-purple-400">
+                        {analysisResult.scoreExplanation?.finalScore ??
+                          analysisResult.threatScore}
+                        <span className="ml-1 text-xs text-slate-600">
+                          / 100
+                        </span>
+                      </p>
+
+                    </div>
+
+                  </div>
+
+                  {/* SCORE SUMMARY */}
+
+                  {analysisResult.scoreExplanation && (
+
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+
+                      <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+
+                        <p className="text-xs text-slate-500">
+                          Base Score
+                        </p>
+
+                        <p className="mt-2 text-xl font-bold text-slate-200">
+                          {analysisResult.scoreExplanation.baseScore}
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          Initial risk baseline
+                        </p>
+
+                      </div>
+
+                      <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+
+                        <p className="text-xs text-slate-500">
+                          Points Added
+                        </p>
+
+                        <p className="mt-2 text-xl font-bold text-orange-400">
+                          +{analysisResult.scoreExplanation.pointsAdded}
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          From forensic indicators
+                        </p>
+
+                      </div>
+
+                      <div className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+
+                        <p className="text-xs text-slate-500">
+                          Raw Score
+                        </p>
+
+                        <p className="mt-2 text-xl font-bold text-cyan-400">
+                          {analysisResult.scoreExplanation.rawScore}
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          Before score cap
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                  )}
+
+                  {/* BREAKDOWN */}
+
+                  <div className="mt-5">
+
+                    <div className="mb-3 flex items-center justify-between">
+
+                      <div>
+
+                        <p className="text-sm font-medium text-slate-200">
+                          Risk Contribution Breakdown
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-600">
+                          Weighted forensic factors contributing to the score.
+                        </p>
+
+                      </div>
+
+                      <span className="rounded-full bg-purple-500/10 px-3 py-1 text-xs font-medium text-purple-400">
+                        {analysisResult.scoreBreakdown.length} factors
+                      </span>
+
+                    </div>
+
+                    <div className="space-y-3">
+
+                      {analysisResult.scoreBreakdown.map(
+                        (item, index) => {
+
+                          const points =
+                            Number(item.points) || 0
+
+                          const percentage =
+                            Math.min(
+                              100,
+                              Math.max(
+                                0,
+                                (points / 40) * 100
+                              )
+                            )
+
+                          return (
+
+                            <div
+                              key={`${item.factor}-${index}`}
+                              className="rounded-xl border border-slate-800 bg-slate-950 p-4"
+                            >
+
+                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+
+                                <div className="min-w-0 flex-1">
+
+                                  <div className="flex items-start gap-3">
+
+                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-xs font-bold text-purple-400">
+                                      {index + 1}
+                                    </div>
+
+                                    <div className="min-w-0">
+
+                                      <p className="text-sm font-medium text-slate-200">
+                                        {item.factor}
+                                      </p>
+
+                                      {item.reason && (
+
+                                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                                          {item.reason}
+                                        </p>
+
+                                      )}
+
+                                    </div>
+
+                                  </div>
+
+                                </div>
+
+                                <div className="shrink-0 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2">
+
+                                  <span className="text-sm font-bold text-red-400">
+                                    +{points}
+                                  </span>
+
+                                  <span className="ml-1 text-xs text-slate-600">
+                                    pts
+                                  </span>
+
+                                </div>
+
+                              </div>
+
+                              {/* CONTRIBUTION BAR */}
+
+                              <div className="mt-3">
+
+                                <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+
+                                  <div
+                                    className="h-full rounded-full bg-purple-400 transition-all"
+                                    style={{
+                                      width: `${percentage}%`,
+                                    }}
+                                  ></div>
+
+                                </div>
+
+                              </div>
+
+                            </div>
+
+                          )
+                        }
+                      )}
+
+                    </div>
+
+                  </div>
+
+                  {/* METHOD */}
+
+                  <div className="mt-5 rounded-xl border border-purple-500/10 bg-slate-950/60 p-4">
+
+                    <div className="flex items-start gap-3">
+
+                      <span className="text-sm">
+                        ℹ️
+                      </span>
+
+                      <div>
+
+                        <p className="text-xs font-medium text-slate-300">
+                          Scoring Method
+                        </p>
+
+                        <p className="mt-1 text-xs leading-5 text-slate-600">
+                          {analysisResult.scoreExplanation?.method ||
+                            'Threat score is calculated from a transparent baseline plus weighted forensic indicators.'}
+                        </p>
+
+                        <p className="mt-2 text-xs text-purple-400">
+                          TraceMail uses an explainable rule-based forensic intelligence engine.
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              )}
+
+              {/* =========================================
                   CATEGORY / PRIORITY
               ========================================= */}
 
@@ -1355,7 +2149,8 @@ Paste the complete email content here...`}
                         : analysisResult.authentication?.spf === 'UNKNOWN'
                           ? '?'
                           : '✕'}{' '}
-                      {analysisResult.authentication?.spf || 'UNKNOWN'}
+                      {analysisResult.authentication?.spf ||
+                        'UNKNOWN'}
                     </p>
 
                   </div>
@@ -1382,7 +2177,8 @@ Paste the complete email content here...`}
                         : analysisResult.authentication?.dkim === 'UNKNOWN'
                           ? '?'
                           : '✕'}{' '}
-                      {analysisResult.authentication?.dkim || 'UNKNOWN'}
+                      {analysisResult.authentication?.dkim ||
+                        'UNKNOWN'}
                     </p>
 
                   </div>
@@ -1409,7 +2205,8 @@ Paste the complete email content here...`}
                         : analysisResult.authentication?.dmarc === 'UNKNOWN'
                           ? '?'
                           : '✕'}{' '}
-                      {analysisResult.authentication?.dmarc || 'UNKNOWN'}
+                      {analysisResult.authentication?.dmarc ||
+                        'UNKNOWN'}
                     </p>
 
                   </div>
@@ -1549,6 +2346,146 @@ Paste the complete email content here...`}
                     )}
 
                   </div>
+
+                </div>
+
+              )}
+
+
+              {/* =========================================
+                  ATTACHMENT FORENSICS
+              ========================================= */}
+
+              {analysisResult.attachments?.length > 0 && (
+
+                <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-5">
+
+                  <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+
+                    <div>
+
+                      <p className="text-sm font-medium text-cyan-400">
+                        Attachment Forensics
+                      </p>
+
+                      <p className="mt-1 text-xs text-slate-500">
+                        Static forensic analysis of email attachments, file types and evidence hashes.
+                      </p>
+
+                    </div>
+
+                    <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-400">
+                      {analysisResult.attachments.length} attachment{analysisResult.attachments.length === 1 ? '' : 's'}
+                    </span>
+
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+
+                    {analysisResult.attachments.map((attachment, index) => (
+
+                      <div
+                        key={`${attachment.name || 'attachment'}-${index}`}
+                        className="rounded-xl border border-slate-800 bg-slate-950 p-4"
+                      >
+
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+
+                          <div className="min-w-0">
+
+                            <p className="break-all text-sm font-semibold text-slate-200">
+                              📎 {attachment.name || 'Unnamed attachment'}
+                            </p>
+
+                            <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-slate-500 sm:grid-cols-2">
+
+                              <span>
+                                Type: <span className="text-slate-300">{attachment.type || 'Unknown'}</span>
+                              </span>
+
+                              <span>
+                                Size: <span className="text-slate-300">{attachment.size ?? 0} bytes</span>
+                              </span>
+
+                              <span>
+                                Extension: <span className="font-mono text-slate-300">{attachment.extension || 'None'}</span>
+                              </span>
+
+                            </div>
+
+                            {attachment.sha256 && (
+                              <p className="mt-3 break-all font-mono text-[10px] leading-5 text-slate-500">
+                                SHA-256: <span className="text-slate-400">{attachment.sha256}</span>
+                              </p>
+                            )}
+
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                    ))}
+
+                  </div>
+
+                  {analysisResult.attachmentForensics && (
+
+                    <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4">
+
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                        <div>
+
+                          <p className="text-xs font-medium text-slate-300">
+                            Attachment Risk Assessment
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            {analysisResult.attachmentForensics.suspiciousAttachmentCount || 0} suspicious attachment{analysisResult.attachmentForensics.suspiciousAttachmentCount === 1 ? '' : 's'} detected
+                          </p>
+
+                        </div>
+
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                          analysisResult.attachmentForensics.riskLevel === 'Critical'
+                            ? 'bg-red-500/10 text-red-400'
+                            : analysisResult.attachmentForensics.riskLevel === 'High'
+                              ? 'bg-orange-500/10 text-orange-400'
+                              : analysisResult.attachmentForensics.riskLevel === 'Medium'
+                                ? 'bg-yellow-500/10 text-yellow-400'
+                                : 'bg-green-500/10 text-green-400'
+                        }`}>
+                          {analysisResult.attachmentForensics.riskLevel || 'Low'} Risk
+                        </span>
+
+                      </div>
+
+                      {analysisResult.attachmentForensics.findings?.length > 0 && (
+
+                        <div className="mt-4 space-y-2">
+
+                          {analysisResult.attachmentForensics.findings.map((finding, index) => (
+
+                            <div
+                              key={index}
+                              className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2"
+                            >
+                              <p className="text-xs leading-5 text-slate-400">
+                                <span className="mr-2 font-semibold text-cyan-400">{index + 1}.</span>
+                                {finding}
+                              </p>
+                            </div>
+
+                          ))}
+
+                        </div>
+
+                      )}
+
+                    </div>
+
+                  )}
 
                 </div>
 

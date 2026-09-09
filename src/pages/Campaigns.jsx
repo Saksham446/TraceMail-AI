@@ -18,6 +18,22 @@ const DEMO_CAMPAIGNS = [
     status: 'Active',
     confidence: 94,
     real: false,
+    domainsList: [
+      'micros0ft-support.com',
+      'microsoft-security-alert.com',
+      'account-verify.net',
+    ],
+    ipsList: [
+      '185.220.101.42',
+      '185.220.101.43',
+    ],
+    indicators: [
+      'verify your account',
+      'password',
+      'urgent',
+      'login',
+      'suspicious URL',
+    ],
   },
   {
     id: 'CMP-2026-002',
@@ -34,6 +50,20 @@ const DEMO_CAMPAIGNS = [
     status: 'Active',
     confidence: 91,
     real: false,
+    domainsList: [
+      'company-finance-secure.com',
+      'vendor-payment.net',
+    ],
+    ipsList: [
+      '185.220.102.20',
+      '185.220.102.21',
+    ],
+    indicators: [
+      'urgent payment',
+      'confidential',
+      'new vendor account',
+      'INR 2,45,000',
+    ],
   },
   {
     id: 'CMP-2026-003',
@@ -50,6 +80,20 @@ const DEMO_CAMPAIGNS = [
     status: 'Monitoring',
     confidence: 87,
     real: false,
+    domainsList: [
+      'corporate-password-reset.com',
+      'secure-login-portal.net',
+    ],
+    ipsList: [
+      '103.75.118.20',
+      '103.75.118.21',
+    ],
+    indicators: [
+      'password reset',
+      'verify identity',
+      'login',
+      'account suspended',
+    ],
   },
   {
     id: 'CMP-2026-004',
@@ -66,6 +110,19 @@ const DEMO_CAMPAIGNS = [
     status: 'Monitoring',
     confidence: 82,
     real: false,
+    domainsList: [
+      'delivery-track-alert.com',
+      'parcel-verification.net',
+    ],
+    ipsList: [
+      '45.91.20.11',
+      '45.91.20.12',
+    ],
+    indicators: [
+      'delivery notification',
+      'tracking link',
+      'verify delivery',
+    ],
   },
 ]
 
@@ -76,7 +133,8 @@ export default function Campaigns() {
 
   const [loading, setLoading] = useState(true)
 
-  const [backendStatus, setBackendStatus] = useState('Connecting...')
+  const [backendStatus, setBackendStatus] =
+    useState('Connecting...')
 
   const [error, setError] = useState('')
 
@@ -91,7 +149,15 @@ export default function Campaigns() {
     setError('')
 
     try {
-      const response = await fetch(TICKET_API_URL)
+      const token = localStorage.getItem('tracemail_auth_token')
+
+      const response = await fetch(TICKET_API_URL, {
+        headers: {
+          ...(token
+            ? { Authorization: `Bearer ${token}` }
+            : {}),
+        },
+      })
 
       if (!response.ok) {
         throw new Error(
@@ -114,7 +180,6 @@ export default function Campaigns() {
       setBackendStatus('Connected')
 
       setLastUpdated(new Date())
-
     } catch (err) {
       console.error(
         'Campaign backend error:',
@@ -128,7 +193,6 @@ export default function Campaigns() {
       )
 
       setTickets([])
-
     } finally {
       setLoading(false)
     }
@@ -157,8 +221,8 @@ export default function Campaigns() {
       ticket.domain ||
       extractDomain(
         ticket.sender ||
-        ticket.from ||
-        ''
+          ticket.from ||
+          ''
       )
 
     const sourceIp =
@@ -177,14 +241,14 @@ export default function Campaigns() {
 
     const threatScore = Number(
       ticket.threatScore ??
-      ticket.riskScore ??
-      0
+        ticket.riskScore ??
+        0
     )
 
     const confidence = Number(
       ticket.aiConfidence ??
-      ticket.confidence ??
-      0
+        ticket.confidence ??
+        0
     )
 
     const subject =
@@ -233,16 +297,6 @@ export default function Campaigns() {
     const groups = new Map()
 
     normalized.forEach((ticket) => {
-      /*
-       * Campaign correlation key:
-       *
-       * 1. Domain
-       * 2. Source IP
-       * 3. Threat category
-       *
-       * This is an explainable correlation approach.
-       */
-
       const domain =
         ticket.normalizedDomain ||
         'unknown-domain'
@@ -280,7 +334,7 @@ export default function Campaigns() {
 
     let counter = 1
 
-    groups.forEach((group, key) => {
+    groups.forEach((group) => {
       const domains = unique(
         group
           .map(
@@ -320,10 +374,10 @@ export default function Campaigns() {
               group.reduce(
                 (sum, item) =>
                   sum +
-                  (item.normalizedScore || 0),
+                  (item.normalizedScore ||
+                    0),
                 0
-              ) /
-                group.length
+              ) / group.length
             )
           : 0
 
@@ -361,11 +415,10 @@ export default function Campaigns() {
 
       const category =
         getCampaignType(
-          group
-            .map(
-              (item) =>
-                item.normalizedCategory
-            )
+          group.map(
+            (item) =>
+              item.normalizedCategory
+          )
         )
 
       const risk =
@@ -417,9 +470,7 @@ export default function Campaigns() {
 
       const firstSeen =
         dates.length > 0
-          ? formatDate(
-              dates[0]
-            )
+          ? formatDate(dates[0])
           : 'Recently'
 
       const lastSeen =
@@ -448,8 +499,7 @@ export default function Campaigns() {
 
         ips: ips.length,
 
-        iocs:
-          indicatorSet.length,
+        iocs: indicatorSet.length,
 
         firstSeen,
 
@@ -468,7 +518,6 @@ export default function Campaigns() {
         ipsList: ips,
 
         indicators: indicatorSet,
-
       })
 
       counter += 1
@@ -490,12 +539,6 @@ export default function Campaigns() {
     ) {
       return DEMO_CAMPAIGNS
     }
-
-    /*
-     * Real investigations appear first.
-     * Demo campaigns remain visible to make
-     * the SIH demonstration richer.
-     */
 
     return [
       ...realCampaigns,
@@ -687,11 +730,13 @@ export default function Campaigns() {
       campaign
     )
 
-    window.scrollTo({
-      top: document.body
-        .scrollHeight,
-      behavior: 'smooth',
-    })
+    setTimeout(() => {
+      window.scrollTo({
+        top: document.body
+          .scrollHeight,
+        behavior: 'smooth',
+      })
+    }, 50)
   }
 
   return (
@@ -726,7 +771,6 @@ export default function Campaigns() {
           </div>
 
         </div>
-
 
         <div className="flex flex-wrap items-center gap-3">
 
@@ -775,7 +819,6 @@ export default function Campaigns() {
 
           </div>
 
-
           <button
             type="button"
             onClick={fetchTickets}
@@ -791,7 +834,6 @@ export default function Campaigns() {
 
       </div>
 
-
       {/* =========================================
           BACKEND INFO
       ========================================= */}
@@ -802,9 +844,7 @@ export default function Campaigns() {
 
           <div className="flex items-start gap-3">
 
-            <span>
-              ⚠️
-            </span>
+            <span>⚠️</span>
 
             <div>
 
@@ -823,7 +863,6 @@ export default function Campaigns() {
         </div>
 
       )}
-
 
       {/* =========================================
           CAMPAIGN STATISTICS
@@ -881,7 +920,6 @@ export default function Campaigns() {
 
       </div>
 
-
       {/* =========================================
           CAMPAIGN OVERVIEW
       ========================================= */}
@@ -916,7 +954,6 @@ export default function Campaigns() {
 
           </div>
 
-
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 
             <Metric
@@ -948,7 +985,6 @@ export default function Campaigns() {
             />
 
           </div>
-
 
           <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/60 p-5">
 
@@ -1025,7 +1061,6 @@ export default function Campaigns() {
 
         </div>
 
-
         {/* Threat Distribution */}
 
         <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
@@ -1045,7 +1080,6 @@ export default function Campaigns() {
             </p>
 
           </div>
-
 
           <div className="space-y-5">
 
@@ -1112,7 +1146,6 @@ export default function Campaigns() {
 
       </div>
 
-
       {/* =========================================
           CAMPAIGN LIST
       ========================================= */}
@@ -1137,7 +1170,6 @@ export default function Campaigns() {
 
           </div>
 
-
           <button
             onClick={() =>
               setSelectedCampaign(
@@ -1150,7 +1182,6 @@ export default function Campaigns() {
           </button>
 
         </div>
-
 
         <div className="overflow-x-auto rounded-xl border border-slate-800">
 
@@ -1191,7 +1222,6 @@ export default function Campaigns() {
               </tr>
 
             </thead>
-
 
             <tbody className="divide-y divide-slate-800">
 
@@ -1245,7 +1275,6 @@ export default function Campaigns() {
 
                     </td>
 
-
                     <td className="px-5 py-4">
 
                       <span className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs text-slate-400">
@@ -1255,7 +1284,6 @@ export default function Campaigns() {
                       </span>
 
                     </td>
-
 
                     <td className="px-5 py-4">
 
@@ -1275,13 +1303,11 @@ export default function Campaigns() {
 
                     </td>
 
-
                     <td className="px-5 py-4 text-sm text-slate-300">
                       {
                         campaign.emails
                       }
                     </td>
-
 
                     <td className="px-5 py-4 text-sm text-slate-300">
                       {
@@ -1289,13 +1315,11 @@ export default function Campaigns() {
                       }
                     </td>
 
-
                     <td className="px-5 py-4 text-sm text-slate-300">
                       {
                         campaign.ips
                       }
                     </td>
-
 
                     <td className="px-5 py-4">
 
@@ -1319,7 +1343,6 @@ export default function Campaigns() {
         </div>
 
       </div>
-
 
       {/* =========================================
           SELECTED CAMPAIGN DETAILS
@@ -1361,7 +1384,6 @@ export default function Campaigns() {
 
             </div>
 
-
             <RiskBadge
               risk={
                 selectedCampaign.risk
@@ -1369,7 +1391,6 @@ export default function Campaigns() {
             />
 
           </div>
-
 
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
@@ -1404,8 +1425,9 @@ export default function Campaigns() {
 
           </div>
 
-
-          {/* LIVE CORRELATION DATA */}
+          {/* =========================================
+              LIVE CORRELATION DATA
+          ========================================= */}
 
           {selectedCampaign.real && (
 
@@ -1431,7 +1453,6 @@ export default function Campaigns() {
 
               </div>
 
-
               <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
 
                 <CorrelationList
@@ -1450,7 +1471,6 @@ export default function Campaigns() {
 
               </div>
 
-
               <div className="mt-4">
 
                 <CorrelationList
@@ -1466,74 +1486,65 @@ export default function Campaigns() {
 
           )}
 
+          {/* =========================================
+              INVESTIGATION RELATIONSHIP GRAPH
+          ========================================= */}
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="mt-6 rounded-xl border border-cyan-500/20 bg-slate-950/60 p-5">
 
-            {/* Correlation Graph */}
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
 
-            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-5">
+              <div>
 
-              <p className="text-xs font-medium uppercase tracking-wider text-cyan-500">
-                Correlation Graph
-              </p>
+                <div className="flex items-center gap-2">
 
-              <h3 className="mt-1 text-sm font-semibold text-slate-200">
-                Related Indicators
-              </h3>
-
-
-              <div className="relative mt-6 flex h-56 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
-
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.08),transparent_55%)]"></div>
-
-                <div className="relative flex items-center justify-center">
-
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full border border-cyan-400/30 bg-cyan-500/10 text-2xl shadow-lg shadow-cyan-500/10">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/10 text-lg">
                     🕸
+                  </span>
+
+                  <div>
+
+                    <p className="text-xs font-medium uppercase tracking-wider text-cyan-500">
+                      Investigation Relationship Graph
+                    </p>
+
+                    <h3 className="mt-1 text-sm font-semibold text-slate-200">
+                      Correlated Evidence Network
+                    </h3>
+
                   </div>
-
-
-                  <div className="absolute -left-36 top-1/2 h-px w-28 bg-cyan-500/30"></div>
-
-                  <div className="absolute -right-36 top-1/2 h-px w-28 bg-cyan-500/30"></div>
-
-                  <div className="absolute left-1/2 -top-24 h-20 w-px bg-cyan-500/30"></div>
-
-                  <div className="absolute left-1/2 -bottom-24 h-20 w-px bg-cyan-500/30"></div>
-
-
-                  <span className="absolute -left-48 top-1/2 -translate-y-1/2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-[10px] text-slate-500">
-                    {
-                      selectedCampaign.emails
-                    } Emails
-                  </span>
-
-                  <span className="absolute -right-48 top-1/2 -translate-y-1/2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-[10px] text-slate-500">
-                    {
-                      selectedCampaign.domains
-                    } Domains
-                  </span>
-
-                  <span className="absolute left-1/2 -top-32 -translate-x-1/2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-[10px] text-slate-500">
-                    {
-                      selectedCampaign.ips
-                    } Source IPs
-                  </span>
-
-                  <span className="absolute left-1/2 -bottom-32 -translate-x-1/2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-[10px] text-slate-500">
-                    {
-                      selectedCampaign.iocs
-                    } IOCs
-                  </span>
 
                 </div>
 
+                <p className="mt-3 max-w-3xl text-xs leading-5 text-slate-500">
+                  Visual relationship between this campaign and its
+                  correlated email cases, sender domains, source IPs
+                  and extracted indicators.
+                </p>
+
               </div>
+
+              <span className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-1.5 text-[10px] uppercase tracking-wider text-green-400">
+                {selectedCampaign.real
+                  ? 'LIVE RELATIONSHIPS'
+                  : 'DEMO RELATIONSHIPS'}
+              </span>
 
             </div>
 
+            <RelationshipGraph
+              campaign={
+                selectedCampaign
+              }
+            />
 
-            {/* Campaign Details */}
+          </div>
+
+          {/* =========================================
+              CAMPAIGN DETAILS
+          ========================================= */}
+
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
 
             <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-5">
 
@@ -1544,7 +1555,6 @@ export default function Campaigns() {
               <h3 className="mt-1 text-sm font-semibold text-slate-200">
                 Campaign Activity
               </h3>
-
 
               <div className="mt-6 space-y-4">
 
@@ -1592,14 +1602,11 @@ export default function Campaigns() {
 
               </div>
 
-
               <div className="mt-6 rounded-xl border border-yellow-500/10 bg-yellow-500/5 p-4">
 
                 <div className="flex gap-3">
 
-                  <span>
-                    ⚠️
-                  </span>
+                  <span>⚠️</span>
 
                   <div>
 
@@ -1621,10 +1628,72 @@ export default function Campaigns() {
 
             </div>
 
+            {/* Graph Explanation */}
+
+            <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-5">
+
+              <p className="text-xs font-medium uppercase tracking-wider text-cyan-500">
+                Relationship Intelligence
+              </p>
+
+              <h3 className="mt-1 text-sm font-semibold text-slate-200">
+                How This Graph Works
+              </h3>
+
+              <div className="mt-5 space-y-3">
+
+                <GraphLegend
+                  icon="✉"
+                  title="Email Cases"
+                  description="Investigation records correlated with this campaign."
+                  className="border-blue-500/20 bg-blue-500/5"
+                />
+
+                <GraphLegend
+                  icon="🌐"
+                  title="Sender Domains"
+                  description="Domains associated with correlated investigations."
+                  className="border-yellow-500/20 bg-yellow-500/5"
+                />
+
+                <GraphLegend
+                  icon="◉"
+                  title="Source IPs"
+                  description="Infrastructure observed in the investigation records."
+                  className="border-cyan-500/20 bg-cyan-500/5"
+                />
+
+                <GraphLegend
+                  icon="⚠"
+                  title="Indicators"
+                  description="Extracted forensic signals linked to the campaign."
+                  className="border-red-500/20 bg-red-500/5"
+                />
+
+              </div>
+
+              <div className="mt-5 rounded-xl border border-slate-800 bg-slate-900 p-4">
+
+                <p className="text-[10px] uppercase tracking-wider text-slate-600">
+                  Correlation Logic
+                </p>
+
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  TraceMail correlates investigations using shared
+                  sender domains, source IP addresses and threat
+                  categories. The graph provides an explainable
+                  visual representation of these relationships.
+                </p>
+
+              </div>
+
+            </div>
+
           </div>
 
-
-          {/* REAL CASES */}
+          {/* =========================================
+              REAL CASES
+          ========================================= */}
 
           {selectedCampaign.real &&
             selectedCampaign.tickets?.length >
@@ -1643,7 +1712,6 @@ export default function Campaigns() {
                   </h3>
 
                 </div>
-
 
                 <div className="space-y-3">
 
@@ -1685,7 +1753,6 @@ export default function Campaigns() {
 
                             </div>
 
-
                             <div className="flex flex-wrap items-center gap-2">
 
                               <RiskBadge
@@ -1694,7 +1761,6 @@ export default function Campaigns() {
                                     normalized.normalizedScore
                                   )
                                 }
-
                               />
 
                               <span className="rounded-lg bg-slate-800 px-2.5 py-1 text-[10px] text-slate-400">
@@ -1706,7 +1772,6 @@ export default function Campaigns() {
                             </div>
 
                           </div>
-
 
                           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
 
@@ -1748,7 +1813,6 @@ export default function Campaigns() {
 
       )}
 
-
       {/* =========================================
           FOOTER
       ========================================= */}
@@ -1773,7 +1837,842 @@ export default function Campaigns() {
 
 
 /* =========================================
-   HELPERS
+   RELATIONSHIP GRAPH
+========================================= */
+
+function RelationshipGraph({
+  campaign,
+}) {
+  const graphData = useMemo(() => {
+    const emails =
+      campaign.tickets?.length > 0
+        ? campaign.tickets
+            .map(
+              (ticket, index) =>
+                normalizeGraphTicket(
+                  ticket,
+                  index
+                )
+            )
+        : createDemoEmails(
+            campaign
+          )
+
+    const domains = unique(
+      campaign.domainsList ||
+        []
+    )
+
+    const ips = unique(
+      campaign.ipsList ||
+        []
+    )
+
+    const indicators = unique(
+      campaign.indicators ||
+        []
+    )
+
+    return {
+      emails: emails.slice(0, 5),
+      domains: domains.slice(0, 4),
+      ips: ips.slice(0, 3),
+      indicators:
+        indicators.slice(0, 5),
+    }
+  }, [campaign])
+
+  const emailPositions =
+    getCircularPositions(
+      graphData.emails.length,
+      110,
+      180,
+      180
+    )
+
+  const domainPositions =
+    getTopPositions(
+      graphData.domains.length
+    )
+
+  const ipPositions =
+    getRightPositions(
+      graphData.ips.length
+    )
+
+  const indicatorPositions =
+    getBottomPositions(
+      graphData.indicators.length
+    )
+
+  const allNodes = [
+    {
+      id: 'campaign',
+      x: 400,
+      y: 180,
+      type: 'campaign',
+      label: 'CAMPAIGN',
+      value: truncate(
+        campaign.name,
+        20
+      ),
+    },
+
+    ...graphData.emails.map(
+      (email, index) => ({
+        id: `email-${index}`,
+        ...emailPositions[index],
+        type: 'email',
+        label: 'EMAIL',
+        value: truncate(
+          email.subject,
+          22
+        ),
+      })
+    ),
+
+    ...graphData.domains.map(
+      (domain, index) => ({
+        id: `domain-${index}`,
+        ...domainPositions[index],
+        type: 'domain',
+        label: 'DOMAIN',
+        value: truncate(
+          domain,
+          22
+        ),
+      })
+    ),
+
+    ...graphData.ips.map(
+      (ip, index) => ({
+        id: `ip-${index}`,
+        ...ipPositions[index],
+        type: 'ip',
+        label: 'SOURCE IP',
+        value: truncate(
+          ip,
+          20
+        ),
+      })
+    ),
+
+    ...graphData.indicators.map(
+      (indicator, index) => ({
+        id: `indicator-${index}`,
+        ...indicatorPositions[index],
+        type: 'indicator',
+        label: 'IOC',
+        value: truncate(
+          indicator,
+          22
+        ),
+      })
+    ),
+  ]
+
+  const center =
+    allNodes.find(
+      (node) =>
+        node.id ===
+        'campaign'
+    )
+
+  return (
+    <div className="mt-6">
+
+      {/* Graph Stats */}
+
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+        <GraphStat
+          label="Email Cases"
+          value={
+            graphData.emails.length
+          }
+          icon="✉"
+        />
+
+        <GraphStat
+          label="Domains"
+          value={
+            graphData.domains.length
+          }
+          icon="🌐"
+        />
+
+        <GraphStat
+          label="Source IPs"
+          value={
+            graphData.ips.length
+          }
+          icon="◉"
+        />
+
+        <GraphStat
+          label="IOCs"
+          value={
+            graphData.indicators.length
+          }
+          icon="⚠"
+        />
+
+      </div>
+
+      {/* Actual SVG Graph */}
+
+      <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+
+        <div className="min-w-[820px]">
+
+          <svg
+            viewBox="0 0 800 430"
+            className="h-[430px] w-full"
+            role="img"
+            aria-label="Investigation relationship graph"
+          >
+
+            {/* Background */}
+
+            <defs>
+
+              <radialGradient
+                id="graphGlow"
+                cx="50%"
+                cy="42%"
+                r="55%"
+              >
+                <stop
+                  offset="0%"
+                  stopColor="#22d3ee"
+                  stopOpacity="0.10"
+                />
+
+                <stop
+                  offset="100%"
+                  stopColor="#020617"
+                  stopOpacity="0"
+                />
+              </radialGradient>
+
+              <filter
+                id="nodeGlow"
+              >
+                <feGaussianBlur
+                  stdDeviation="3"
+                  result="blur"
+                />
+
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+
+            </defs>
+
+            <rect
+              width="800"
+              height="430"
+              fill="url(#graphGlow)"
+            />
+
+            {/* Grid */}
+
+            {Array.from({
+              length: 9,
+            }).map((_, index) => (
+              <line
+                key={`vertical-${index}`}
+                x1={
+                  index * 100
+                }
+                y1="0"
+                x2={
+                  index * 100
+                }
+                y2="430"
+                stroke="#1e293b"
+                strokeOpacity="0.25"
+              />
+            ))}
+
+            {Array.from({
+              length: 6,
+            }).map((_, index) => (
+              <line
+                key={`horizontal-${index}`}
+                x1="0"
+                y1={
+                  index * 86
+                }
+                x2="800"
+                y2={
+                  index * 86
+                }
+                stroke="#1e293b"
+                strokeOpacity="0.25"
+              />
+            ))}
+
+            {/* Connection Lines */}
+
+            {allNodes
+              .filter(
+                (node) =>
+                  node.id !==
+                  'campaign'
+              )
+              .map((node) => (
+                <line
+                  key={`line-${node.id}`}
+                  x1={center.x}
+                  y1={center.y}
+                  x2={node.x}
+                  y2={node.y}
+                  stroke={
+                    getNodeColor(
+                      node.type
+                    )
+                  }
+                  strokeOpacity="0.38"
+                  strokeWidth="1.5"
+                />
+              ))}
+
+            {/* Connection Dots */}
+
+            {allNodes
+              .filter(
+                (node) =>
+                  node.id !==
+                  'campaign'
+              )
+              .map((node) => (
+                <circle
+                  key={`dot-${node.id}`}
+                  cx={
+                    center.x +
+                    (node.x -
+                      center.x) *
+                      0.72
+                  }
+                  cy={
+                    center.y +
+                    (node.y -
+                      center.y) *
+                      0.72
+                  }
+                  r="3"
+                  fill={getNodeColor(
+                    node.type
+                  )}
+                  opacity="0.75"
+                />
+              ))}
+
+            {/* Nodes */}
+
+            {allNodes.map(
+              (node) => (
+                <GraphNode
+                  key={
+                    node.id
+                  }
+                  node={node}
+                />
+              )
+            )}
+
+          </svg>
+
+        </div>
+
+      </div>
+
+      {/* Relationship explanation */}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+
+        <RelationshipPill
+          color="bg-cyan-400"
+          label="Campaign"
+        />
+
+        <RelationshipPill
+          color="bg-blue-400"
+          label="Email"
+        />
+
+        <RelationshipPill
+          color="bg-yellow-400"
+          label="Domain"
+        />
+
+        <RelationshipPill
+          color="bg-purple-400"
+          label="Source IP"
+        />
+
+        <RelationshipPill
+          color="bg-red-400"
+          label="IOC"
+        />
+
+      </div>
+
+      <p className="mt-3 text-[10px] leading-5 text-slate-600">
+        Showing the most relevant correlated nodes for readability.
+        Counts above represent the complete campaign relationship set.
+      </p>
+
+    </div>
+  )
+}
+
+
+/* =========================================
+   GRAPH NODE
+========================================= */
+
+function GraphNode({
+  node,
+}) {
+  const color =
+    getNodeColor(
+      node.type
+    )
+
+  const isCenter =
+    node.type ===
+    'campaign'
+
+  const radius =
+    isCenter ? 43 : 30
+
+  return (
+    <g
+      transform={`translate(${node.x}, ${node.y})`}
+      filter={
+        isCenter
+          ? 'url(#nodeGlow)'
+          : undefined
+      }
+    >
+
+      {/* Outer ring */}
+
+      <circle
+        r={radius + 7}
+        fill="none"
+        stroke={color}
+        strokeOpacity={
+          isCenter
+            ? '0.18'
+            : '0.10'
+        }
+        strokeWidth="1"
+      />
+
+      {/* Node */}
+
+      <circle
+        r={radius}
+        fill="#0f172a"
+        stroke={color}
+        strokeOpacity={
+          isCenter
+            ? '0.75'
+            : '0.45'
+        }
+        strokeWidth={
+          isCenter ? 2 : 1.5
+        }
+      />
+
+      {/* Inner */}
+
+      <circle
+        r={
+          isCenter
+            ? 34
+            : 22
+        }
+        fill={color}
+        fillOpacity={
+          isCenter
+            ? '0.10'
+            : '0.06'
+        }
+      />
+
+      {/* Icon */}
+
+      <text
+        textAnchor="middle"
+        dominantBaseline="middle"
+        y={
+          isCenter
+            ? -4
+            : -2
+        }
+        fontSize={
+          isCenter ? 20 : 15
+        }
+      >
+        {getNodeIcon(
+          node.type
+        )}
+      </text>
+
+      {/* Label */}
+
+      <text
+        textAnchor="middle"
+        y={
+          isCenter
+            ? 15
+            : 12
+        }
+        fill="#94a3b8"
+        fontSize={
+          isCenter ? 8 : 7
+        }
+        fontWeight="600"
+        letterSpacing="1"
+      >
+        {node.label}
+      </text>
+
+      {/* External value */}
+
+      <g>
+
+        <rect
+          x={
+            isCenter
+              ? -90
+              : -78
+          }
+          y={
+            radius + 12
+          }
+          width={
+            isCenter
+              ? 180
+              : 156
+          }
+          height="30"
+          rx="6"
+          fill="#0f172a"
+          stroke="#1e293b"
+        />
+
+        <text
+          textAnchor="middle"
+          y={
+            radius + 31
+          }
+          fill={
+            isCenter
+              ? '#22d3ee'
+              : '#cbd5e1'
+          }
+          fontSize="9"
+          fontFamily="monospace"
+        >
+          {node.value}
+        </text>
+
+      </g>
+
+    </g>
+  )
+}
+
+
+/* =========================================
+   GRAPH POSITION HELPERS
+========================================= */
+
+function getCircularPositions(
+  count,
+  radius,
+  centerX,
+  centerY
+) {
+  if (count === 0) {
+    return []
+  }
+
+  return Array.from(
+    { length: count },
+    (_, index) => {
+      const angle =
+        (-Math.PI / 2) +
+        (Math.PI * 2 * index) /
+          count
+
+      return {
+        x:
+          centerX +
+          Math.cos(angle) *
+            radius,
+        y:
+          centerY +
+          Math.sin(angle) *
+            radius,
+      }
+    }
+  )
+}
+
+
+function getTopPositions(
+  count
+) {
+  const positions = [
+    { x: 180, y: 62 },
+    { x: 320, y: 48 },
+    { x: 480, y: 48 },
+    { x: 620, y: 62 },
+  ]
+
+  return positions.slice(
+    0,
+    count
+  )
+}
+
+
+function getRightPositions(
+  count
+) {
+  const positions = [
+    { x: 650, y: 150 },
+    { x: 680, y: 240 },
+    { x: 610, y: 330 },
+  ]
+
+  return positions.slice(
+    0,
+    count
+  )
+}
+
+
+function getBottomPositions(
+  count
+) {
+  const positions = [
+    { x: 180, y: 350 },
+    { x: 320, y: 382 },
+    { x: 480, y: 382 },
+    { x: 620, y: 350 },
+    { x: 400, y: 400 },
+  ]
+
+  return positions.slice(
+    0,
+    count
+  )
+}
+
+
+function normalizeGraphTicket(
+  ticket,
+  index
+) {
+  return {
+    id:
+      ticket.ticketId ||
+      ticket.caseId ||
+      ticket._id ||
+      `CASE-${index + 1}`,
+
+    subject:
+      ticket.subject ||
+      'Suspicious Email',
+  }
+}
+
+
+function createDemoEmails(
+  campaign
+) {
+  const count =
+    Math.min(
+      Number(
+        campaign.emails || 0
+      ),
+      5
+    )
+
+  return Array.from(
+    {
+      length:
+        Math.max(
+          count,
+          1
+        ),
+    },
+    (_, index) => ({
+      id: `DEMO-${index + 1}`,
+      subject:
+        index === 0
+          ? campaign.name
+          : `${campaign.type} Investigation ${index + 1}`,
+    })
+  )
+}
+
+
+/* =========================================
+   GRAPH UI HELPERS
+========================================= */
+
+function getNodeColor(
+  type
+) {
+  const colors = {
+    campaign: '#22d3ee',
+    email: '#60a5fa',
+    domain: '#facc15',
+    ip: '#c084fc',
+    indicator: '#f87171',
+  }
+
+  return (
+    colors[type] ||
+    '#94a3b8'
+  )
+}
+
+
+function getNodeIcon(
+  type
+) {
+  const icons = {
+    campaign: '🕸',
+    email: '✉',
+    domain: '🌐',
+    ip: '◉',
+    indicator: '⚠',
+  }
+
+  return (
+    icons[type] ||
+    '•'
+  )
+}
+
+
+function truncate(
+  value,
+  maxLength
+) {
+  const text =
+    String(value || '')
+
+  if (
+    text.length <=
+    maxLength
+  ) {
+    return text
+  }
+
+  return `${text.slice(
+    0,
+    maxLength - 3
+  )}...`
+}
+
+
+function GraphStat({
+  label,
+  value,
+  icon,
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+
+      <div className="flex items-center justify-between">
+
+        <p className="text-[9px] uppercase tracking-wider text-slate-600">
+          {label}
+        </p>
+
+        <span className="text-sm">
+          {icon}
+        </span>
+
+      </div>
+
+      <p className="mt-2 text-lg font-bold text-slate-200">
+        {value}
+      </p>
+
+    </div>
+  )
+}
+
+
+function RelationshipPill({
+  color,
+  label,
+}) {
+  return (
+    <span className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-[10px] text-slate-500">
+
+      <span
+        className={`h-2 w-2 rounded-full ${color}`}
+      />
+
+      {label}
+
+    </span>
+  )
+}
+
+
+function GraphLegend({
+  icon,
+  title,
+  description,
+  className,
+}) {
+  return (
+    <div
+      className={`rounded-xl border p-3 ${className}`}
+    >
+
+      <div className="flex items-start gap-3">
+
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-950 text-sm">
+          {icon}
+        </span>
+
+        <div>
+
+          <p className="text-xs font-medium text-slate-300">
+            {title}
+          </p>
+
+          <p className="mt-1 text-[10px] leading-4 text-slate-600">
+            {description}
+          </p>
+
+        </div>
+
+      </div>
+
+    </div>
+  )
+}
+
+
+/* =========================================
+   GENERAL HELPERS
 ========================================= */
 
 function unique(values) {
@@ -1843,8 +2742,10 @@ function getCampaignType(
     return 'Malware'
   }
 
-  return categories[0] ||
+  return (
+    categories[0] ||
     'Suspicious'
+  )
 }
 
 

@@ -134,14 +134,15 @@ export default function GeoIntelligence() {
     }
   }
 
-  // Automatically use the source IP from the email analyzed in TraceMail.
+  // Automatically investigate the source IP from the latest TraceMail analysis.
+  // If no source IP is available, use the configured demo IP so the module
+  // remains presentation-ready instead of staying on the empty state.
   useEffect(() => {
     const savedIp = getSavedSourceIp()
+    const investigationIp = savedIp || '185.220.101.42'
 
-    if (savedIp) {
-      setIpInput(savedIp)
-      handleAnalyze(savedIp)
-    }
+    setIpInput(investigationIp)
+    handleAnalyze(investigationIp)
   }, [])
 
   const displayIp = ipInput.trim() || getSavedSourceIp() || '185.220.101.42'
@@ -154,9 +155,6 @@ export default function GeoIntelligence() {
     geoData?.latitude != null && geoData?.longitude != null
       ? `${geoData.latitude}, ${geoData.longitude}`
       : 'Unavailable'
-
-  const latitude = geoData?.latitude
-  const longitude = geoData?.longitude
 
   const asn = geoData?.connection?.asn
     ? `AS${geoData.connection.asn}`
@@ -427,7 +425,7 @@ export default function GeoIntelligence() {
               </h2>
             </div>
 
-            <div className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2">
 
               <span className="text-xs text-slate-600">
                 SOURCE
@@ -436,6 +434,12 @@ export default function GeoIntelligence() {
               <span className="font-mono text-xs text-cyan-400">
                 {displayIp}
               </span>
+
+              {geoData && (
+                <span className="rounded-full bg-green-500/10 px-2 py-1 text-[10px] font-medium text-green-400">
+                  {geoError ? 'DEMO FALLBACK' : 'LIVE INTELLIGENCE'}
+                </span>
+              )}
 
             </div>
 
@@ -569,29 +573,17 @@ export default function GeoIntelligence() {
               </div>
 
 
-              {/* Live Geographic Map */}
+              {/* Live Map */}
 
               <div className="relative mt-5 h-64 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
 
-                {latitude != null && longitude != null ? (
-                  <>
-                    <iframe
-                      title={`Geographic location of ${displayIp}`}
-                      src={`https://www.openstreetmap.org/export/embed.html?bbox=${longitude - 0.08}%2C${latitude - 0.05}%2C${longitude + 0.08}%2C${latitude + 0.05}&layer=mapnik&marker=${latitude}%2C${longitude}`}
-                      className="h-full w-full border-0"
-                      loading="lazy"
-                      referrerPolicy="no-referrer-when-downgrade"
-                    />
-
-                    <div className="pointer-events-none absolute left-3 top-3 rounded-lg border border-slate-700 bg-slate-950/90 px-3 py-2 shadow-lg">
-                      <p className="text-[10px] font-medium uppercase tracking-wider text-cyan-400">
-                        Live Location
-                      </p>
-                      <p className="mt-1 font-mono text-[10px] text-slate-300">
-                        {coordinates}
-                      </p>
-                    </div>
-                  </>
+                {geoData?.latitude != null && geoData?.longitude != null ? (
+                  <iframe
+                    title={`Map location for ${displayIp}`}
+                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${geoData.longitude - 0.08}%2C${geoData.latitude - 0.05}%2C${geoData.longitude + 0.08}%2C${geoData.latitude + 0.05}&layer=mapnik&marker=${geoData.latitude}%2C${geoData.longitude}`}
+                    className="h-full w-full border-0"
+                    loading="lazy"
+                  />
                 ) : (
                   <div className="flex h-full items-center justify-center">
                     <div className="text-center">
@@ -600,19 +592,13 @@ export default function GeoIntelligence() {
                         Geographic Map
                       </p>
                       <p className="mt-1 text-[10px] text-slate-600">
-                        Coordinates are unavailable for this source.
+                        Waiting for geolocation data...
                       </p>
                     </div>
                   </div>
                 )}
 
               </div>
-
-              {latitude != null && longitude != null && (
-                <p className="mt-2 text-[10px] leading-4 text-slate-600">
-                  IP geolocation is contextual intelligence and may indicate the network provider location rather than the sender's exact physical location.
-                </p>
-              )}
 
             </div>
 

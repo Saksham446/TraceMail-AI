@@ -5,8 +5,40 @@ const API_URL = 'http://localhost:5001/api/tickets'
 
 const filterOptions = ['All', 'Critical', 'High', 'Medium', 'Low']
 
+function getStoredUser() {
+  try {
+    return JSON.parse(
+      localStorage.getItem('tracemail_user') || 'null',
+    )
+  } catch {
+    return null
+  }
+}
+
+function getAuthHeaders(includeJson = false) {
+  const token = localStorage.getItem('tracemail_auth_token')
+
+  return {
+    ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+    ...(token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : {}),
+  }
+}
+
 export default function Cases() {
   const navigate = useNavigate()
+  const currentUser = getStoredUser()
+
+  const canManageCases =
+    currentUser?.role === 'Admin' ||
+    currentUser?.role === 'Analyst'
+
+  const canGenerateReports =
+    currentUser?.role === 'Admin' ||
+    currentUser?.role === 'Analyst'
 
   const [caseList, setCaseList] = useState([])
   const [search, setSearch] = useState('')
@@ -40,7 +72,9 @@ export default function Cases() {
       setLoading(true)
       setError('')
 
-      const response = await fetch(API_URL)
+      const response = await fetch(API_URL, {
+        headers: getAuthHeaders(),
+      })
 
       if (!response.ok) {
         throw new Error('Failed to fetch cases')
@@ -196,9 +230,7 @@ export default function Cases() {
 
       const response = await fetch(API_URL, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(true),
         body: JSON.stringify(payload),
       })
 
@@ -295,12 +327,14 @@ export default function Cases() {
 
             </div>
 
-            <button
-              onClick={() => setShowNewCase(true)}
-              className="rounded-xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
-            >
-              + New Case
-            </button>
+            {canManageCases && (
+              <button
+                onClick={() => setShowNewCase(true)}
+                className="rounded-xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
+              >
+                + New Case
+              </button>
+            )}
 
           </div>
 
@@ -744,7 +778,11 @@ export default function Cases() {
 
                   {/* Details */}
 
-                  <div className="mt-6 grid grid-cols-2 gap-3">
+                  <div
+                    className={`mt-6 grid gap-3 ${
+                      canGenerateReports ? 'grid-cols-2' : 'grid-cols-1'
+                    }`}
+                  >
 
                     <DetailBox
                       label="Source IP"
@@ -844,31 +882,70 @@ export default function Cases() {
 
                     <div className="mt-4 space-y-4">
 
-                      <TimelineItem
-                        time={selectedCase.created}
-                        title="Case opened"
-                        description="Investigation created and stored in the backend database."
-                      />
+                      {selectedCase.auditTimeline?.length > 0 ? (
+                        selectedCase.auditTimeline.map((event, index) => (
+                          <TimelineItem
+                            key={`${event.action}-${event.timestamp || index}`}
+                            time={formatAuditTime(event.timestamp)}
+                            title={event.action}
+                            description={event.details || 'Forensic activity recorded.'}
+                            actor={event.actor}
+                            evidenceHash={event.evidenceHash}
+                            isLast={index === selectedCase.auditTimeline.length - 1}
+                          />
+                        ))
+                      ) : (
+                        <>
+                          <TimelineItem
+                            time={selectedCase.created}
+                            title="Case opened"
+                            description="Investigation created and stored in the backend database."
+                            isLast={false}
+                          />
 
-                      <TimelineItem
-                        time={selectedCase.created}
-                        title="Indicators extracted"
-                        description={`${selectedCase.indicators} indicators associated with the case.`}
-                      />
-
-                      <TimelineItem
-                        time={selectedCase.updated}
-                        title="Latest investigation update"
-                        description="Threat intelligence and forensic evidence reviewed."
-                      />
+                          <TimelineItem
+                            time={selectedCase.updated}
+                            title="Latest investigation update"
+                            description="Threat intelligence and forensic evidence reviewed."
+                            isLast
+                          />
+                        </>
+                      )}
 
                     </div>
+
+                    {/* Evidence integrity summary */}
+                    {selectedCase.evidenceHash && (
+                      <div className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                        <div className="flex items-start gap-3">
+                          <span className="text-lg">🔐</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">
+                              Evidence Integrity
+                            </p>
+                            <p className="mt-1 text-[10px] text-slate-600">
+                              {selectedCase.hashAlgorithm} forensic fingerprint
+                            </p>
+                            <p className="mt-2 break-all font-mono text-[10px] leading-5 text-slate-400">
+                              {selectedCase.evidenceHash}
+                            </p>
+                            <p className="mt-2 text-[10px] text-green-400">
+                              ✓ Evidence fingerprint preserved with case
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                   </div>
 
                   {/* Actions */}
 
-                  <div className="mt-6 grid grid-cols-2 gap-3">
+                  <div
+                    className={`mt-6 grid gap-3 ${
+                      canGenerateReports ? 'grid-cols-2' : 'grid-cols-1'
+                    }`}
+                  >
 
                     <button
                       onClick={() => navigate('/forensics')}
@@ -877,12 +954,14 @@ export default function Cases() {
                       View Evidence
                     </button>
 
-                    <button
-                      onClick={() => navigate('/reports')}
-                      className="rounded-xl bg-cyan-500 px-4 py-3 text-xs font-semibold text-slate-950 transition hover:bg-cyan-400"
-                    >
-                      Generate Report
-                    </button>
+                    {canGenerateReports && (
+                      <button
+                        onClick={() => navigate('/reports')}
+                        className="rounded-xl bg-cyan-500 px-4 py-3 text-xs font-semibold text-slate-950 transition hover:bg-cyan-400"
+                      >
+                        Generate Report
+                      </button>
+                    )}
 
                   </div>
 
@@ -948,7 +1027,7 @@ export default function Cases() {
           NEW CASE MODAL
       ========================================= */}
 
-      {showNewCase && (
+      {showNewCase && canManageCases && (
 
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
@@ -1237,6 +1316,15 @@ function formatTicket(ticket) {
     indicators: Array.isArray(ticket.indicators)
       ? ticket.indicators.length
       : 0,
+
+    // Chain of Custody / Audit Timeline
+    auditTimeline: Array.isArray(ticket.auditTimeline)
+      ? ticket.auditTimeline
+      : [],
+
+    evidenceHash: ticket.evidenceHash || '',
+    hashAlgorithm: ticket.hashAlgorithm || 'SHA-256',
+
     description:
       ticket.emailBody ||
       ticket.recommendedSolution ||
@@ -1422,27 +1510,67 @@ function DetailBox({ label, value }) {
 }
 
 /* =========================================
+   AUDIT TIMESTAMP FORMAT
+========================================= */
+
+function formatAuditTime(timestamp) {
+  if (!timestamp) return 'Unknown time'
+
+  const date = new Date(timestamp)
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown time'
+  }
+
+  return date.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+/* =========================================
    TIMELINE
 ========================================= */
 
-function TimelineItem({ time, title, description }) {
+function TimelineItem({
+  time,
+  title,
+  description,
+  actor,
+  evidenceHash,
+  isLast = false,
+}) {
 
   return (
     <div className="flex gap-3">
 
       <div className="flex flex-col items-center">
 
-        <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-cyan-400" />
+        <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-cyan-400 ring-4 ring-cyan-500/10" />
 
-        <span className="mt-1 h-full w-px bg-slate-800" />
+        {!isLast && (
+          <span className="mt-1 h-full min-h-8 w-px bg-slate-800" />
+        )}
 
       </div>
 
-      <div className="pb-2">
+      <div className="min-w-0 pb-2">
 
-        <p className="text-[10px] font-medium uppercase tracking-wider text-cyan-400">
-          {time}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-cyan-400">
+            {time}
+          </p>
+
+          {actor && (
+            <span className="rounded-full border border-slate-800 bg-slate-950 px-2 py-0.5 text-[9px] text-slate-600">
+              {actor}
+            </span>
+          )}
+        </div>
 
         <p className="mt-1 text-xs font-semibold text-slate-300">
           {title}
@@ -1451,6 +1579,17 @@ function TimelineItem({ time, title, description }) {
         <p className="mt-1 text-xs leading-5 text-slate-600">
           {description}
         </p>
+
+        {evidenceHash && (
+          <div className="mt-2 rounded-lg border border-slate-800 bg-slate-950 p-2.5">
+            <p className="text-[9px] uppercase tracking-wider text-slate-700">
+              Evidence SHA-256
+            </p>
+            <p className="mt-1 break-all font-mono text-[9px] leading-4 text-slate-500">
+              {evidenceHash}
+            </p>
+          </div>
+        )}
 
       </div>
 
